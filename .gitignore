@@ -1,0 +1,8 @@
+.build/
+.build-support/
+dist/
+.DS_Store
+.swiftpm/
+.freemind/local/
+Vendor/SwiftTerm/.git/
+__pycache__/

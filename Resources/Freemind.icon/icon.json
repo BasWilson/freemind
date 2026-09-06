@@ -1,0 +1,44 @@
+{
+  "fill": {
+    "automatic-gradient": "extended-srgb:0.16000,0.17000,0.19000,1.00000"
+  },
+  "groups": [
+    {
+      "name": "02-Rising-Wing",
+      "layers": [
+        {
+          "image-name": "02-Rising-Wing.svg",
+          "name": "02-Rising-Wing"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.35
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.2
+      }
+    },
+    {
+      "name": "03-Fold",
+      "layers": [
+        {
+          "image-name": "03-Fold.svg",
+          "name": "03-Fold"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.18
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.45
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

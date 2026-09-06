@@ -1,0 +1,111 @@
+name: Release Freemind
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize releases so an older, slower build cannot overwrite the latest feed.
+concurrency:
+  group: freemind-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.architecture }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            architecture: arm64
+          - runner: macos-26-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      FREEMIND_UPDATE_REPOSITORY: ${{ github.repository }}
+      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+      CLANG_MODULE_CACHE_PATH: ${{ github.workspace }}/.build/module-cache
+      SWIFTPM_MODULECACHE_OVERRIDE: ${{ github.workspace }}/.build/module-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate release configuration
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          export FREEMIND_RELEASE_VERSION="${RELEASE_TAG#v}"
+          test -n "$SPARKLE_PUBLIC_ED_KEY" || { echo 'Set repository variable SPARKLE_PUBLIC_ED_KEY'; exit 1; }
+          test -n "$PRIVATE_KEY" || { echo 'Set repository secret SPARKLE_PRIVATE_ED_KEY'; exit 1; }
+          python3 Scripts/configure-release.py --check
+          test "$(uname -m)" = '${{ matrix.architecture }}'
+          xcodebuild -version
+          echo "FREEMIND_RELEASE_VERSION=$FREEMIND_RELEASE_VERSION" >> "$GITHUB_ENV"
+      - name: Test release metadata validation
+        run: python3 -m unittest discover -s Tests/ReleaseTests -v
+      - name: Build and package
+        run: bash Scripts/package-app.sh
+      - name: Test Freemind
+        run: swift test --disable-sandbox --cache-path .build/cache
+      - name: Test signed updates and tamper rejection
+        run: python3 Tests/ReleaseTests/signing_smoke.py
+      - name: Sign and validate update feed
+        env:
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: bash Scripts/generate-appcast.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.architecture }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/appcast-*.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+      - name: Verify both architectures and checksums
+        working-directory: release
+        run: |
+          for architecture in arm64 x86_64; do
+            test -s "appcast-$architecture.xml"
+            test -s "Freemind-${RELEASE_TAG#v}-macOS-$architecture.zip"
+            test -s "Freemind-${RELEASE_TAG#v}-macOS-$architecture-update.zip"
+          done
+          sha256sum --check ./*.sha256
+      - name: Publish complete release
+        run: |
+          # A failed upload leaves a draft; reruns may resume that draft.
+          if gh release view "$RELEASE_TAG" --json isDraft > existing-release.json 2>/dev/null; then
+            jq -e '.isDraft == true' existing-release.json > /dev/null || { echo 'This version is already published. Push a new version tag.'; exit 1; }
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Freemind ${RELEASE_TAG#v}" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" release/* --clobber
+          # Let GitHub select latest by semantic version, including on reruns
+          # and when deliberately publishing an older maintenance release.
+          gh api --method PATCH "repos/$GH_REPO/releases/$(gh release view "$RELEASE_TAG" --json databaseId --jq .databaseId)" \
+            -F draft=false -f make_latest=legacy
