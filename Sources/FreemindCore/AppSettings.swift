@@ -32,9 +32,16 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var customThemeID: String?
     public var terminalCustomThemeID: String?
     public var terminalAppearance = TerminalAppearance.app
+    public var translucentWindows = false
+    public var windowOpacity = 0.9
     public init() {}
 
-    private enum CodingKeys: String, CodingKey { case workspaceDefaults, appearance, theme, terminalTheme, terminalAppearance, customThemeID, terminalCustomThemeID }
+    public func effectiveWindowOpacity(reduceTransparency: Bool) -> Double {
+        guard translucentWindows, !reduceTransparency else { return 1 }
+        return windowOpacity.isFinite ? min(1, max(0.65, windowOpacity)) : 0.9
+    }
+
+    private enum CodingKeys: String, CodingKey { case workspaceDefaults, appearance, theme, terminalTheme, terminalAppearance, customThemeID, terminalCustomThemeID, translucentWindows, windowOpacity }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         workspaceDefaults = try values.decodeIfPresent(CodexOptions.self, forKey: .workspaceDefaults) ?? CodexOptions()
@@ -44,6 +51,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         customThemeID = try values.decodeIfPresent(String.self, forKey: .customThemeID)
         terminalCustomThemeID = try values.decodeIfPresent(String.self, forKey: .terminalCustomThemeID)
         terminalAppearance = try values.decodeIfPresent(String.self, forKey: .terminalAppearance).flatMap(TerminalAppearance.init(rawValue:)) ?? .app
+        translucentWindows = try values.decodeIfPresent(Bool.self, forKey: .translucentWindows) ?? false
+        windowOpacity = min(1, max(0.65, try values.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? 0.9))
     }
 
     public static func load(from url: URL) throws -> AppSettings {
@@ -53,6 +62,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public func save(to url: URL) throws {
         _ = try workspaceDefaults.arguments()
+        guard windowOpacity.isFinite, (0.65...1).contains(windowOpacity) else { throw FreemindError.message("Window opacity must be between 65% and 100%.") }
         try DurableFile.save(self, to: url)
     }
 }

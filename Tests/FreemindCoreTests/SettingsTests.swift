@@ -16,6 +16,7 @@ final class SettingsTests: XCTestCase {
         settings.appearance = .light; settings.theme = .forest
         settings.terminalAppearance = .dark; settings.terminalTheme = .ocean
         settings.customThemeID = "my-app-theme"; settings.terminalCustomThemeID = "my-terminal-theme"
+        settings.translucentWindows = true; settings.windowOpacity = 0.8
         settings.workspaceDefaults.model = "custom-model"
         settings.workspaceDefaults.profile = "development"
         settings.workspaceDefaults.reasoning = "high"
@@ -49,6 +50,26 @@ final class SettingsTests: XCTestCase {
         invalid = saved; invalid.workspaceDefaults.configOverrides = ["missing equals"]
         XCTAssertThrowsError(try invalid.save(to: url))
         XCTAssertEqual(try AppSettings.load(from: url), saved)
+    }
+
+    func testWindowTransparencyDefaultsBoundsAndAccessibility() throws {
+        var settings = AppSettings()
+        XCTAssertEqual(settings.effectiveWindowOpacity(reduceTransparency: false), 1)
+        settings.translucentWindows = true; settings.windowOpacity = 0.8
+        XCTAssertEqual(settings.effectiveWindowOpacity(reduceTransparency: false), 0.8)
+        XCTAssertEqual(settings.effectiveWindowOpacity(reduceTransparency: true), 1)
+        for (raw, expected) in [(0.1, 0.65), (1.5, 1.0)] {
+            let data = Data("{\"translucentWindows\":true,\"windowOpacity\":\(raw)}".utf8)
+            let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
+            XCTAssertEqual(decoded.windowOpacity, expected)
+        }
+        let url = try temporaryFolder().appendingPathComponent("settings.json")
+        try settings.save(to: url)
+        for invalid in [0.0, 1.5, Double.nan, Double.infinity] {
+            var changed = settings; changed.windowOpacity = invalid
+            XCTAssertThrowsError(try changed.save(to: url))
+        }
+        XCTAssertEqual(try AppSettings.load(from: url), settings)
     }
 
     func testSettingsRecoverFromBackupAndReportUnrecoverableCorruption() throws {

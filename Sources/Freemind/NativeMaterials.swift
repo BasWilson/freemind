@@ -28,3 +28,24 @@ struct NativePaneButtonStyle: ButtonStyle {
             .frame(minWidth: 22, minHeight: 22).contentShape(Rectangle())
     }
 }
+
+struct WindowOpacity: NSViewRepresentable {
+    var opacity: Double
+    func makeNSView(context: Context) -> WindowOpacityView {
+        let view = WindowOpacityView(); view.opacity = opacity; return view
+    }
+    func updateNSView(_ view: WindowOpacityView, context: Context) {
+        view.opacity = opacity; view.apply()
+    }
+}
+
+final class WindowOpacityView: NSView {
+    var opacity = 1.0
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); apply() }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    func apply() {
+        // Window-level compositing also covers native editors and terminal rendering.
+        // Keep a readability floor even if a caller supplies an invalid value.
+        window?.alphaValue = opacity.isFinite ? CGFloat(min(1, max(0.65, opacity))) : 1
+    }
+}

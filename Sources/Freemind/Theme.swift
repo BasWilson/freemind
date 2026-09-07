@@ -190,6 +190,7 @@ extension EnvironmentValues {
 private struct AppAppearanceModifier: ViewModifier {
     @ObservedObject var store: AppStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
         let settings = store.settings
         let dark = settings.appearance == .dark || (settings.appearance == .system && colorScheme == .dark)
@@ -200,6 +201,7 @@ private struct AppAppearanceModifier: ViewModifier {
             : (settings.terminalTheme == nil ? custom : nil)
         let terminalDark = settings.terminalAppearance == .dark || (settings.terminalAppearance == .app && dark)
         content
+            .background(WindowOpacity(opacity: settings.effectiveWindowOpacity(reduceTransparency: reduceTransparency)))
             .environment(\.appTheme, theme)
             .environment(\.terminalTheme, Theme(style: settings.terminalTheme ?? settings.theme, isDark: terminalDark, custom: terminalCustom))
             .tint(theme.accent)
