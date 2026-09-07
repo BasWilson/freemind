@@ -15,6 +15,7 @@ final class SettingsTests: XCTestCase {
         var settings = AppSettings()
         settings.appearance = .light; settings.theme = .forest
         settings.terminalAppearance = .dark; settings.terminalTheme = .ocean
+        settings.customThemeID = "my-app-theme"; settings.terminalCustomThemeID = "my-terminal-theme"
         settings.workspaceDefaults.model = "custom-model"
         settings.workspaceDefaults.profile = "development"
         settings.workspaceDefaults.reasoning = "high"

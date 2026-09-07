@@ -5,31 +5,59 @@ import FreemindCore
 struct Theme: Equatable {
     var style: AppColorTheme = .forest
     var isDark = false
+    var custom: CustomTheme?
 
-    private func color(_ pair: (UInt32, UInt32)) -> NSColor { Self.color(isDark ? pair.1 : pair.0) }
+    func hex(for role: ThemeColorRole) -> UInt32 {
+        let variant = isDark ? custom?.dark : custom?.light
+        if let value = variant?.colors[role.rawValue].flatMap(ThemeHex.parse) { return value }
+        let pair: (UInt32, UInt32)
+        switch role {
+        case .background: pair = palette.background
+        case .panel: pair = palette.panel
+        case .canvas: pair = palette.canvas
+        case .accent: pair = palette.accent
+        case .text: pair = palette.text
+        case .muted: pair = palette.muted
+        case .keyword: pair = palette.keyword
+        case .number: pair = palette.number
+        case .string: pair = palette.string
+        case .addition: pair = palette.addition
+        }
+        return isDark ? pair.1 : pair.0
+    }
+    private func color(_ role: ThemeColorRole) -> NSColor { Self.color(hex(for: role)) }
     static func color(_ hex: UInt32) -> NSColor {
         NSColor(srgbRed: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255, blue: CGFloat(hex & 255) / 255, alpha: 1)
     }
-    var nativeAccent: NSColor { color(palette.accent) }
-    var nativeBackground: NSColor { color(palette.background) }
-    var nativePanel: NSColor { color(palette.panel) }
-    var nativeCanvas: NSColor { color(palette.canvas) }
-    var nativeText: NSColor { color(palette.text) }
-    var nativeMuted: NSColor { color(palette.muted) }
+    var nativeAccent: NSColor { color(.accent) }
+    var nativeBackground: NSColor { color(.background) }
+    var nativePanel: NSColor { color(.panel) }
+    var nativeCanvas: NSColor { color(.canvas) }
+    var nativeText: NSColor { color(.text) }
+    var nativeMuted: NSColor { color(.muted) }
     var nativeSelection: NSColor { nativeCanvas.blended(withFraction: isDark ? 0.28 : 0.20, of: nativeAccent)! }
-    var keyword: NSColor { color(palette.keyword) }
-    var number: NSColor { color(palette.number) }
-    var string: NSColor { color(palette.string) }
+    var keyword: NSColor { color(.keyword) }
+    var number: NSColor { color(.number) }
+    var string: NSColor { color(.string) }
     var background: Color { Color(nsColor: nativeBackground) }
     var panel: Color { Color(nsColor: nativePanel) }
     var accent: Color { Color(nsColor: nativeAccent) }
     var border: Color { Color(nsColor: nativeText).opacity(0.12) }
-    var addition: Color { Color(nsColor: color(palette.addition)) }
-    var ansiColors: [UInt32] { isDark ? palette.ansiDark : palette.ansiLight }
+    var addition: Color { Color(nsColor: color(.addition)) }
+    var ansiColors: [UInt32] {
+        if let colors = (isDark ? custom?.dark : custom?.light)?.ansiColors?.compactMap(ThemeHex.parse), colors.count == 16 { return colors }
+        return isDark ? palette.ansiDark : palette.ansiLight
+    }
+
+    func customCopy(name: String) -> CustomTheme {
+        var result = custom ?? CustomTheme(name: name, base: style)
+        result.id = UUID().uuidString.lowercased(); result.name = name
+        return result
+    }
 
     // Light/dark pairs keep a theme's identity when appearance changes.
     // Palette references and adaptation notes are in Resources/licenses/Theme-inspirations.txt.
-    private var palette: ThemePalette { Self.palettes[style]! }
+    private var palette: ThemePalette { Self.palettes[custom?.base ?? style]! }
     private static let palettes = Dictionary(uniqueKeysWithValues: AppColorTheme.allCases.map { ($0, makePalette($0)) })
     private static func makePalette(_ style: AppColorTheme) -> ThemePalette {
         switch style {
@@ -165,13 +193,26 @@ private struct AppAppearanceModifier: ViewModifier {
     func body(content: Content) -> some View {
         let settings = store.settings
         let dark = settings.appearance == .dark || (settings.appearance == .system && colorScheme == .dark)
-        let theme = Theme(style: settings.theme, isDark: dark)
+        let custom = store.customThemes.first { $0.id == settings.customThemeID }
+        let theme = Theme(style: settings.theme, isDark: dark, custom: custom)
+        let terminalCustom = settings.terminalCustomThemeID != nil
+            ? store.customThemes.first { $0.id == settings.terminalCustomThemeID }
+            : (settings.terminalTheme == nil ? custom : nil)
         let terminalDark = settings.terminalAppearance == .dark || (settings.terminalAppearance == .app && dark)
         content
             .environment(\.appTheme, theme)
-            .environment(\.terminalTheme, Theme(style: settings.terminalTheme ?? settings.theme, isDark: terminalDark))
+            .environment(\.terminalTheme, Theme(style: settings.terminalTheme ?? settings.theme, isDark: terminalDark, custom: terminalCustom))
             .tint(theme.accent)
             .preferredColorScheme(settings.appearance == .system ? nil : settings.appearance == .dark ? .dark : .light)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let error = store.themeError {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle")
+                        ScrollView { Text(error).font(.caption).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 70)
+                        Button("Reload") { store.reloadThemes() }
+                    }.foregroundStyle(.orange).padding(10).background(theme.panel)
+                }
+            }
     }
 }
 

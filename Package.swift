@@ -14,7 +14,8 @@ let package = Package(
         .executableTarget(name: "Freemind", dependencies: ["FreemindCore", "SwiftTerm", .product(name: "Sparkle", package: "Sparkle")],
                           linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
         .executableTarget(name: "FreemindHelper", dependencies: ["FreemindCore"]),
-        .testTarget(name: "FreemindCoreTests", dependencies: ["FreemindCore"])
+        .testTarget(name: "FreemindCoreTests", dependencies: ["FreemindCore"]),
+        .testTarget(name: "FreemindTests", dependencies: ["Freemind"])
     ],
     swiftLanguageModes: [.v5]
 )

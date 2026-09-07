@@ -4,6 +4,8 @@ import FreemindCore
 
 enum AppPaths {
     static var settings: URL { registry.deletingLastPathComponent().appendingPathComponent("settings.json") }
+    static var themesFolder: URL { registry.deletingLastPathComponent().appendingPathComponent("Themes", isDirectory: true) }
+    static var themes: URL { themesFolder.appendingPathComponent("themes.json") }
     static var tmux: String { Bundle.main.resourceURL?.appendingPathComponent("bin/tmux").path ?? "" }
     static var helper: String { Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/freemind-helper").path }
     static var registry: URL {
@@ -32,18 +34,99 @@ final class AppStore: ObservableObject {
     @Published var loading = true
     @Published var environment = ProcessInfo.processInfo.environment
     @Published private(set) var settings = AppSettings()
+    @Published private(set) var customThemes: [CustomTheme] = []
+    @Published private(set) var themeLoadError: String?
+    private var themesData: Data?
+    private var themeWatcher: FolderWatcher?
+    private var themeReloadTask: Task<Void, Never>?
+    private let settingsURL: URL
+    private let themesURL: URL
     var quitting = false
     private var started = false
     var selected: WorkspaceModel? { workspaces.first { $0.id == selectedID } }
     var registry = Registry()
 
-    init() {
-        do { settings = try AppSettings.load(from: AppPaths.settings) }
+    init(settingsURL: URL = AppPaths.settings, themesURL: URL = AppPaths.themes) {
+        self.settingsURL = settingsURL; self.themesURL = themesURL
+        do { settings = try AppSettings.load(from: settingsURL) }
         catch { self.error = "Could not load app settings: " + error.localizedDescription }
+        do {
+            try FileManager.default.createDirectory(at: themesURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            reloadThemes()
+            themeWatcher = FolderWatcher(root: themesURL.deletingLastPathComponent()) { [weak self] in
+                self?.themeReloadTask?.cancel()
+                self?.themeReloadTask = Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(250))
+                    if !Task.isCancelled { self?.reloadThemes() }
+                }
+            }
+        } catch { themeLoadError = "Could not open the Themes folder: " + error.localizedDescription }
+    }
+
+    deinit { themeReloadTask?.cancel() }
+
+    var themeError: String? {
+        if let themeLoadError { return themeLoadError }
+        if let id = settings.customThemeID, !customThemes.contains(where: { $0.id == id }) {
+            return "The selected app theme is missing from themes.json. Using \(settings.theme.title). Restore the theme or choose another in Appearance settings."
+        }
+        if let id = settings.terminalCustomThemeID, !customThemes.contains(where: { $0.id == id }) {
+            return "The selected terminal theme is missing from themes.json. Using \((settings.terminalTheme ?? settings.theme).title). Restore the theme or choose another in Appearance settings."
+        }
+        return nil
+    }
+
+    func reloadThemes() {
+        do {
+            let loaded = try CustomThemeConfiguration.read(from: themesURL)
+            guard loaded.data != nil || themesData == nil else { throw FreemindError.message("themes.json was removed. Restore it to continue editing your themes.") }
+            customThemes = loaded.configuration.themes; themesData = loaded.data; themeLoadError = nil
+        } catch { themeLoadError = "Theme changes could not be loaded; keeping the last valid colors.\n" + error.localizedDescription }
+    }
+
+    func saveCustomTheme(_ theme: CustomTheme, replacing original: CustomTheme?) throws {
+        let loaded = try CustomThemeConfiguration.read(from: themesURL)
+        guard loaded.data != nil || themesData == nil else { throw FreemindError.message("themes.json was removed. Restore it before saving.") }
+        var configuration = loaded.configuration
+        let existing = configuration.themes.first { $0.id == theme.id }
+        guard existing == original else { throw FreemindError.message("This theme changed outside the editor. Close the editor and reopen it to use the latest colors.") }
+        if let index = configuration.themes.firstIndex(where: { $0.id == theme.id }) { configuration.themes[index] = theme }
+        else { configuration.themes.append(theme) }
+        try configuration.save(to: themesURL, expected: loaded.data)
+        reloadThemes()
+    }
+
+    func useCustomTheme(_ theme: CustomTheme) throws {
+        var value = settings; value.theme = theme.base; value.customThemeID = theme.id
+        try saveSettings(value)
+    }
+
+    func openThemeConfiguration(prompt: String? = nil) throws {
+        let folder = themesURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: themesURL.path) {
+            guard themesData == nil else { throw FreemindError.message("themes.json was removed. Restore it before opening the configuration.") }
+            try CustomThemeConfiguration().save(to: themesURL, expected: nil)
+        }
+        for (name, text) in [
+            ("THEMES.md", CustomThemeConfiguration.instructions),
+            ("AGENTS.md", "# Theme workspace\n\nRead THEMES.md for Freemind's theme format and editing instructions. The custom themes are in themes.json.\n")
+        ] {
+            let url = folder.appendingPathComponent(name)
+            if !FileManager.default.fileExists(atPath: url.path) { try Data(text.utf8).write(to: url, options: .atomic) }
+        }
+        guard let workspace = add(folder) else { throw FreemindError.message(error ?? "Could not open the Themes workspace.") }
+        if workspace.codeDocument.dirty, !workspace.codeDocument.save() { throw FreemindError.message(workspace.codeDocument.error ?? "Save your editor changes before opening themes.json.") }
+        workspace.restoration.selectedFile = "themes.json"; workspace.restoration.selectedTab = "Code"; workspace.restoration.filesVisible = true
+        guard workspace.saveNow() else { throw FreemindError.message(workspace.error ?? "Could not save the Themes workspace.") }
+        if let prompt, workspace.addPane(title: "Design a theme", options: settings.workspaceDefaults, prompt: prompt) == nil {
+            throw FreemindError.message(workspace.error ?? "Could not start the theme design terminal.")
+        }
+        reloadThemes()
     }
 
     func saveSettings(_ value: AppSettings) throws {
-        try value.save(to: AppPaths.settings)
+        try value.save(to: settingsURL)
         settings = value
         applyAppearance()
     }
@@ -98,15 +181,16 @@ final class AppStore: ObservableObject {
         panel.prompt = "Open Workspace"
         if panel.runModal() == .OK { for url in panel.urls { add(url) } }
     }
-    func add(_ url: URL) {
+    @discardableResult func add(_ url: URL) -> WorkspaceModel? {
         let canonical = url.standardizedFileURL.resolvingSymlinksInPath()
-        if let existing = workspaces.first(where: { $0.paths.root == canonical }) { selectedID = existing.id; return }
+        if let existing = workspaces.first(where: { $0.paths.root == canonical }) { selectedID = existing.id; return existing }
         do {
             let workspace = try WorkspaceModel(root: canonical, environment: environment, defaults: settings.workspaceDefaults)
             workspaces.append(workspace); selectedID = workspace.id
             missing.removeAll { $0.path == canonical.path }
             workspace.activate(); saveRegistry()
-        } catch { self.error = error.localizedDescription }
+            return workspace
+        } catch { self.error = error.localizedDescription; return nil }
     }
     func remove(_ workspace: WorkspaceModel) {
         workspace.saveNow()

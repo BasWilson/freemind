@@ -29,16 +29,20 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var appearance = AppAppearance.system
     public var theme = AppColorTheme.forest
     public var terminalTheme: AppColorTheme?
+    public var customThemeID: String?
+    public var terminalCustomThemeID: String?
     public var terminalAppearance = TerminalAppearance.app
     public init() {}
 
-    private enum CodingKeys: String, CodingKey { case workspaceDefaults, appearance, theme, terminalTheme, terminalAppearance }
+    private enum CodingKeys: String, CodingKey { case workspaceDefaults, appearance, theme, terminalTheme, terminalAppearance, customThemeID, terminalCustomThemeID }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         workspaceDefaults = try values.decodeIfPresent(CodexOptions.self, forKey: .workspaceDefaults) ?? CodexOptions()
         appearance = try values.decodeIfPresent(String.self, forKey: .appearance).flatMap(AppAppearance.init(rawValue:)) ?? .system
         theme = try values.decodeIfPresent(String.self, forKey: .theme).flatMap(AppColorTheme.init(rawValue:)) ?? .forest
         terminalTheme = try values.decodeIfPresent(String.self, forKey: .terminalTheme).flatMap(AppColorTheme.init(rawValue:))
+        customThemeID = try values.decodeIfPresent(String.self, forKey: .customThemeID)
+        terminalCustomThemeID = try values.decodeIfPresent(String.self, forKey: .terminalCustomThemeID)
         terminalAppearance = try values.decodeIfPresent(String.self, forKey: .terminalAppearance).flatMap(TerminalAppearance.init(rawValue:)) ?? .app
     }
 

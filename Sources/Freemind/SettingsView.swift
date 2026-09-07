@@ -26,59 +26,90 @@ struct AppearanceSettingsView: View {
     @ObservedObject var store: AppStore
     @Environment(\.appTheme) private var theme
     @Environment(\.terminalTheme) private var terminalTheme
+    @Environment(\.openWindow) private var openWindow
     @State private var error: String?
+    @State private var editingTheme: ThemeEditingRequest?
+    @State private var designingTheme: CustomTheme?
     var body: some View {
         Form {
             Section("App appearance") {
                 Picker("Mode", selection: setting(\.appearance)) {
                     ForEach(AppAppearance.allCases, id: \.self) { Text($0.title).tag($0) }
                 }.pickerStyle(.segmented)
-                Picker("Color theme", selection: setting(\.theme)) {
-                    ForEach(AppColorTheme.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
+                Picker("Color theme", selection: themeSelection(terminal: false)) { themeChoices(terminal: false) }
                 Text("System follows your Mac’s appearance. Changes apply to every Freemind window.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Terminal appearance") {
                 Picker("Mode", selection: setting(\.terminalAppearance)) {
                     ForEach(TerminalAppearance.allCases, id: \.self) { Text($0.title).tag($0) }
                 }.pickerStyle(.segmented)
-                Picker("Color theme", selection: setting(\.terminalTheme)) {
-                    Text("Match app").tag(AppColorTheme?.none)
-                    ForEach(AppColorTheme.allCases, id: \.self) { Text($0.title).tag(Optional($0)) }
-                }
+                Picker("Color theme", selection: themeSelection(terminal: true)) { themeChoices(terminal: true) }
                 Text("Choose a separate look for all terminals, including detached windows. Running sessions update immediately.").font(.caption).foregroundStyle(.secondary)
             }
+            Section("Custom themes") {
+                HStack {
+                    Button("New Theme…") { editingTheme = ThemeEditingRequest(theme: theme.customCopy(name: newThemeName)) }
+                    Menu("Edit Theme") {
+                        ForEach(store.customThemes) { custom in
+                            Button(custom.name) { editingTheme = ThemeEditingRequest(theme: custom, original: custom) }
+                        }
+                    }.disabled(store.customThemes.isEmpty)
+                    Button("Create with Codex…") { designingTheme = theme.customCopy(name: newThemeName) }
+                }
+                HStack {
+                    Button("Open Theme Configuration") {
+                        do { try store.openThemeConfiguration(); openWindow(id: "main"); error = nil }
+                        catch { self.error = error.localizedDescription }
+                    }
+                    Button("Reload Themes") { store.reloadThemes() }
+                }
+                Text("Create your own light and dark palettes, or describe a look to Codex. The configuration opens with a guide, and valid saved edits apply automatically.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Preview") {
-                VStack(spacing: 0) {
-                    HStack {
-                        Image(systemName: "leaf.fill").foregroundStyle(theme.accent)
-                        Text("Your workspace").fontWeight(.medium)
-                        Spacer()
-                        Text("Code   Git   Notes").foregroundStyle(.secondary)
-                    }.padding(14).background(theme.panel)
-                    HStack(spacing: 0) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label("Sources", systemImage: "folder").foregroundStyle(theme.accent)
-                            Label("Notes.md", systemImage: "doc.text")
-                        }.font(.caption).padding(16).frame(maxHeight: .infinity, alignment: .top).background(theme.background)
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("❯ freemind").foregroundStyle(Color(nsColor: terminalTheme.nativeAccent))
-                            Text("Ready for your next idea.").foregroundStyle(Color(nsColor: terminalTheme.nativeText))
-                            HStack(spacing: 12) {
-                                Text("added").foregroundStyle(Color(nsColor: Theme.color(terminalTheme.ansiColors[2])))
-                                Text("modified").foregroundStyle(Color(nsColor: Theme.color(terminalTheme.ansiColors[3])))
-                                Text("deleted").foregroundStyle(Color(nsColor: Theme.color(terminalTheme.ansiColors[1])))
-                            }
-                            Text("▍").foregroundStyle(Color(nsColor: terminalTheme.nativeAccent))
-                        }.font(.system(size: 12, design: .monospaced)).padding(16)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .background(Color(nsColor: terminalTheme.nativeCanvas))
-                    }.frame(height: 126)
-                }.clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.border))
+                ThemePreview(theme: theme, terminalTheme: terminalTheme)
             }
             if let error { Section { Text(error).foregroundStyle(.orange) } }
         }.formStyle(.grouped)
+        .sheet(item: $editingTheme) { request in CustomThemeEditor(store: store, theme: request.theme, original: request.original) }
+        .sheet(item: $designingTheme) { theme in CodexThemeDesigner(store: store, theme: theme) }
+    }
+    private var newThemeName: String {
+        let names = Set(store.customThemes.map { $0.name.lowercased() })
+        var name = "My Theme", suffix = 2
+        while names.contains(name.lowercased()) { name = "My Theme \(suffix)"; suffix += 1 }
+        return name
+    }
+    @ViewBuilder private func themeChoices(terminal: Bool) -> some View {
+        if terminal { Text("Match app").tag("app") }
+        ForEach(AppColorTheme.allCases, id: \.self) { Text($0.title).tag("builtin:" + $0.rawValue) }
+        if !store.customThemes.isEmpty {
+            Divider()
+            ForEach(store.customThemes) { Text($0.name + " (Custom)").tag("custom:" + $0.id) }
+        }
+        let selectedID = terminal ? store.settings.terminalCustomThemeID : store.settings.customThemeID
+        if let selectedID, !store.customThemes.contains(where: { $0.id == selectedID }) {
+            Text("Missing custom theme").tag("custom:" + selectedID)
+        }
+    }
+    private func themeSelection(terminal: Bool) -> Binding<String> {
+        Binding(get: {
+            if let id = terminal ? store.settings.terminalCustomThemeID : store.settings.customThemeID { return "custom:" + id }
+            if terminal { return store.settings.terminalTheme.map { "builtin:" + $0.rawValue } ?? "app" }
+            return "builtin:" + store.settings.theme.rawValue
+        }, set: { selection in
+            var settings = store.settings
+            if terminal { settings.terminalCustomThemeID = nil; settings.terminalTheme = nil }
+            else { settings.customThemeID = nil }
+            if selection.hasPrefix("custom:"), let custom = store.customThemes.first(where: { $0.id == String(selection.dropFirst(7)) }) {
+                if terminal { settings.terminalCustomThemeID = custom.id; settings.terminalTheme = custom.base }
+                else { settings.customThemeID = custom.id; settings.theme = custom.base }
+            } else if selection.hasPrefix("builtin:"), let base = AppColorTheme(rawValue: String(selection.dropFirst(8))) {
+                if terminal { settings.terminalTheme = base } else { settings.theme = base }
+            }
+            do { try store.saveSettings(settings); error = nil }
+            catch { self.error = error.localizedDescription }
+        })
     }
     private func setting<Value>(_ key: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
         Binding(get: { store.settings[keyPath: key] }, set: { value in
