@@ -29,23 +29,29 @@ struct NativePaneButtonStyle: ButtonStyle {
     }
 }
 
-struct WindowOpacity: NSViewRepresentable {
-    var opacity: Double
-    func makeNSView(context: Context) -> WindowOpacityView {
-        let view = WindowOpacityView(); view.opacity = opacity; return view
+struct WindowBackdrop: NSViewRepresentable {
+    var enabled: Bool
+    func makeNSView(context: Context) -> WindowBackdropView {
+        let view = WindowBackdropView(); view.enabled = enabled; return view
     }
-    func updateNSView(_ view: WindowOpacityView, context: Context) {
-        view.opacity = opacity; view.apply()
+    func updateNSView(_ view: WindowBackdropView, context: Context) {
+        view.enabled = enabled; view.apply()
     }
 }
 
-final class WindowOpacityView: NSView {
-    var opacity = 1.0
+final class WindowBackdropView: NSVisualEffectView {
+    var enabled = false
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); apply() }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     func apply() {
-        // Window-level compositing also covers native editors and terminal rendering.
-        // Keep a readability floor even if a caller supplies an invalid value.
-        window?.alphaValue = opacity.isFinite ? CGFloat(min(1, max(0.65, opacity))) : 1
+        material = .underWindowBackground
+        blendingMode = .behindWindow
+        state = .active
+        isHidden = !enabled
+        // Fade the main window's content over this macOS blur, instead of fading
+        // the native window itself (which exposes an unblurred desktop).
+        window?.alphaValue = 1
+        window?.isOpaque = !enabled
+        window?.backgroundColor = enabled ? .clear : .windowBackgroundColor
     }
 }

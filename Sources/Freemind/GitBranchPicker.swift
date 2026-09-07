@@ -41,7 +41,8 @@ private struct GitBranchPicker: View {
             HStack {
                 Text("Switch branch").font(.headline)
                 Spacer()
-                Button { Task { await model.refresh(); await model.refreshBranches() } } label: { Image(systemName: "arrow.clockwise") }
+                ProgressView().controlSize(.mini).opacity(model.branchesLoading ? 1 : 0)
+                Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless).help("Refresh branches")
                     .disabled(model.branchesLoading || model.operation != nil)
             }
@@ -55,24 +56,26 @@ private struct GitBranchPicker: View {
             if let operation = model.operation {
                 HStack { ProgressView().controlSize(.small); Text(operation).font(.caption) }
             }
-            if model.branchesLoading {
-                ProgressView("Loading branches…").frame(maxWidth: .infinity, minHeight: 90)
-            } else if filteredBranches.isEmpty {
-                Text(model.branchesError != nil ? "Use Refresh to try again." : !search.isEmpty ? "No branches match your search." : model.notRepository ? "Initialize Git in a terminal, then refresh." : "No branches to switch to yet. Make a commit to create your first branch.")
-                    .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 70)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
-                        branchSection("Local branches", remote: false)
-                        branchSection("Remote branches", remote: true)
+            Group {
+                if model.branchesLoading && model.branches.isEmpty {
+                    ProgressView("Loading branches…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if filteredBranches.isEmpty {
+                    Text(model.branchesError != nil ? "Use Refresh to try again." : !search.isEmpty ? "No branches match your search." : model.notRepository ? "Initialize Git in a terminal, then refresh." : "No branches to switch to yet. Make a commit to create your first branch.")
+                        .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            branchSection("Local branches", remote: false)
+                            branchSection("Remote branches", remote: true)
+                        }
                     }
-                }.frame(maxHeight: 300)
-            }
+                }
+            }.frame(height: 300)
             Text("Git keeps compatible local changes and blocks switches that would overwrite them. Remote branches create a local tracking branch.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(16).frame(width: 380)
-        .task { await model.refresh(); await model.refreshBranches() }
+        .task { await model.refreshCurrentBranch() }
     }
 
     @ViewBuilder private func branchSection(_ title: String, remote: Bool) -> some View {

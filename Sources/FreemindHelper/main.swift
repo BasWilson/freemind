@@ -30,18 +30,21 @@ do {
         let recoveryURL = URL(fileURLWithPath: request.recoveryFile)
         var recovery = (try? DurableFile.load(PaneRecovery.self, from: recoveryURL)) ?? PaneRecovery()
         var arguments = request.arguments
-        if !recovery.hasLaunched, let prompt = request.initialPrompt, !prompt.isEmpty { arguments.append(prompt) }
+        if let prompt = request.initialPrompt, !prompt.isEmpty { arguments.append(prompt) }
+        guard chdir(request.directory) == 0 else { fail("Cannot open workspace directory: \(request.directory)") }
         recovery.hasLaunched = true
         try DurableFile.save(recovery, to: recoveryURL)
+        try TerminalPrompt.remove(recoveryFile: recoveryURL)
         // Do not retain an environment snapshot or initial prompt after the launch has claimed it.
         try? FileManager.default.removeItem(at: url)
         try? FileManager.default.removeItem(at: url.appendingPathExtension("backup"))
-        guard chdir(request.directory) == 0 else { fail("Cannot open workspace directory: \(request.directory)") }
         let argv = ([request.executable] + arguments).map { strdup($0) } + [nil]
         let env = request.environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         request.executable.withCString { ptr in
             argv.withUnsafeBufferPointer { a in env.withUnsafeBufferPointer { e in _ = execve(ptr, a.baseAddress!, e.baseAddress!) } }
         }
-        fail("Could not launch \(request.executable): \(String(cString: strerror(errno)))")
+        let launchError = String(cString: strerror(errno))
+        if let prompt = request.initialPrompt { try TerminalPrompt.save(prompt, recoveryFile: recoveryURL) }
+        fail("Could not launch \(request.executable): \(launchError)")
     } else { fail("Unknown helper command") }
 } catch { fail(error.localizedDescription) }

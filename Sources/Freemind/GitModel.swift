@@ -53,9 +53,10 @@ final class GitModel: ObservableObject {
             snapshot = value; notRepository = false
             if let selected, let new = value.changes.first(where: { $0.id == selected.id }) { self.selected = new; loadDiff(new) }
             else if let first = value.changes.first { select(first) } else { diffTask?.cancel(); selected = nil; diff = nil }
+            await refreshBranches()
         } catch is CancellationError {} catch {
             guard revision == self.revision, operation == nil else { return }
-            if error is GitRepositoryError { notRepository = true; snapshot = nil; branches = []; diffTask?.cancel(); selected = nil; diff = nil }
+            if error is GitRepositoryError { notRepository = true; snapshot = nil; branches = []; branchesError = nil; diffTask?.cancel(); selected = nil; diff = nil }
             else { notRepository = false; if self.error == nil { self.error = "Could not refresh Git.\n\n" + error.localizedDescription } }
         }
     }
@@ -80,16 +81,23 @@ final class GitModel: ObservableObject {
     func refreshBranches() async {
         guard !branchesLoading, operation == nil else { return }
         branchesLoading = true; branchesError = nil
+        let revision = self.revision
         defer { branchesLoading = false }
-        do { branches = try await service.branches() }
-        catch is CancellationError {} catch { branchesError = "Could not load branches.\n\n" + error.localizedDescription }
+        do {
+            let value = try await service.branches()
+            guard revision == self.revision, operation == nil, !notRepository else { return }
+            if branches != value { branches = value }
+        }
+        catch is CancellationError {} catch {
+            guard revision == self.revision, operation == nil, !notRepository else { return }
+            branchesError = "Could not load branches.\n\n" + error.localizedDescription
+        }
     }
     func switchBranch(_ branch: GitBranch) async -> Bool {
         let success = await perform("Switching to \(branch.name)…") {
             do { return try await self.service.switchBranch(branch) }
             catch { throw FreemindError.message("Could not switch to ‘\(branch.name)’.\n\n" + error.localizedDescription) }
         }
-        await refreshBranches()
         return success
     }
 }

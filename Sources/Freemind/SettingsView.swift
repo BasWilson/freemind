@@ -48,17 +48,17 @@ struct AppearanceSettingsView: View {
                 Text("Choose a separate look for all terminals, including detached windows. Running sessions update immediately.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Window transparency") {
-                Toggle("Translucent windows", isOn: setting(\.translucentWindows))
+                Toggle("Translucent main window", isOn: setting(\.translucentWindows))
                 if store.settings.translucentWindows {
                     HStack {
                         Slider(value: setting(\.windowOpacity), in: 0.65...1, step: 0.01) {
-                            Text("Window opacity")
+                            Text("Main window opacity")
                         } minimumValueLabel: { Text("65%") } maximumValueLabel: { Text("100%") }
                         Text("\(Int((store.settings.windowOpacity * 100).rounded()))%")
                             .monospacedDigit().frame(width: 42, alignment: .trailing)
                     }.disabled(reduceTransparency)
                 }
-                Text(reduceTransparency ? "macOS Reduce Transparency is enabled, so windows stay opaque." : "See the desktop and other windows behind Freemind. Applies immediately to workspace, terminal, and Settings windows.")
+                Text(reduceTransparency ? "macOS Reduce Transparency is enabled, so windows stay opaque." : "See a softly blurred background behind the main window. Settings and detached workspace and terminal windows stay opaque.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Custom themes") {

@@ -9,7 +9,7 @@ struct FreemindApp: App {
     @StateObject private var store = AppStore.shared
     var body: some Scene {
         Window("Freemind", id: "main") {
-            MainView(store: store).appAppearance(store: store)
+            MainView(store: store).appAppearance(store: store, mainWindow: true)
         }.windowToolbarStyle(.unified).defaultSize(width: 1400, height: 900)
         .commands { FreemindCommands() }
         WindowGroup("Workspace", id: "workspace", for: String.self) { $id in

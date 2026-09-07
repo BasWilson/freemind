@@ -189,6 +189,7 @@ extension EnvironmentValues {
 
 private struct AppAppearanceModifier: ViewModifier {
     @ObservedObject var store: AppStore
+    var mainWindow: Bool
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
@@ -200,8 +201,12 @@ private struct AppAppearanceModifier: ViewModifier {
             ? store.customThemes.first { $0.id == settings.terminalCustomThemeID }
             : (settings.terminalTheme == nil ? custom : nil)
         let terminalDark = settings.terminalAppearance == .dark || (settings.terminalAppearance == .app && dark)
+        let opacity = mainWindow ? settings.effectiveWindowOpacity(reduceTransparency: reduceTransparency) : 1
         content
-            .background(WindowOpacity(opacity: settings.effectiveWindowOpacity(reduceTransparency: reduceTransparency)))
+            .opacity(opacity)
+            .background {
+                if mainWindow { WindowBackdrop(enabled: opacity < 1).ignoresSafeArea() }
+            }
             .environment(\.appTheme, theme)
             .environment(\.terminalTheme, Theme(style: settings.terminalTheme ?? settings.theme, isDark: terminalDark, custom: terminalCustom))
             .tint(theme.accent)
@@ -219,5 +224,5 @@ private struct AppAppearanceModifier: ViewModifier {
 }
 
 extension View {
-    func appAppearance(store: AppStore) -> some View { modifier(AppAppearanceModifier(store: store)) }
+    func appAppearance(store: AppStore, mainWindow: Bool = false) -> some View { modifier(AppAppearanceModifier(store: store, mainWindow: mainWindow)) }
 }

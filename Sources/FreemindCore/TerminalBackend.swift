@@ -22,6 +22,26 @@ public struct LaunchRequest: Codable, Sendable {
     }
 }
 
+public enum TerminalPrompt {
+    public static func url(recoveryFile: URL) -> URL { recoveryFile.deletingLastPathComponent().appendingPathComponent("initial-prompt.json") }
+    public static func save(_ prompt: String, recoveryFile: URL) throws {
+        let file = url(recoveryFile: recoveryFile)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(prompt).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+    public static func load(recoveryFile: URL) throws -> String? {
+        let file = url(recoveryFile: recoveryFile)
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        // A malformed pending prompt must be reported, never silently dropped.
+        return try JSONDecoder().decode(String.self, from: Data(contentsOf: file))
+    }
+    public static func remove(recoveryFile: URL) throws {
+        let file = url(recoveryFile: recoveryFile)
+        if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+    }
+}
+
 public actor TerminalBackend {
     public let paths: WorkspacePaths
     public let executable: String
@@ -83,6 +103,8 @@ public actor TerminalBackend {
         try manager.createDirectory(at: terminal, withIntermediateDirectories: true)
         let recoveryURL = terminal.appendingPathComponent("recovery.json")
         let recovery = (try? DurableFile.load(PaneRecovery.self, from: recoveryURL)) ?? PaneRecovery()
+        if !recovery.hasLaunched, let initialPrompt { try TerminalPrompt.save(initialPrompt, recoveryFile: recoveryURL) }
+        let pendingPrompt = try TerminalPrompt.load(recoveryFile: recoveryURL)
         let directory = paths.resolve(recovery.hasLaunched ? recovery.workingDirectory : pane.directory)
         let cwd = manager.fileExists(atPath: directory.path) ? directory : paths.root
         var env = environment
@@ -116,7 +138,7 @@ public actor TerminalBackend {
             program = environment["SHELL"] ?? "/bin/zsh"; arguments = ["-l"]
         }
         let request = LaunchRequest(executable: program, arguments: arguments, environment: env, directory: cwd.path,
-                                    recoveryFile: recoveryURL.path, initialPrompt: recovery.hasLaunched ? nil : initialPrompt)
+                                    recoveryFile: recoveryURL.path, initialPrompt: pendingPrompt)
         let requestURL = terminal.appendingPathComponent("launch.json")
         try DurableFile.save(request, to: requestURL)
         try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: requestURL.path)

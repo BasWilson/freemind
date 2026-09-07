@@ -48,7 +48,7 @@ final class WorkspaceModel: ObservableObject, Identifiable {
     private var pendingSave = false
     private var closingPanes: Set<UUID> = []
 
-    init(root: URL, environment: [String: String], defaults: CodexOptions = .init()) throws {
+    init(root: URL, environment: [String: String], defaults: CodexOptions = .init(), terminalBackend: TerminalBackend? = nil) throws {
         paths = WorkspacePaths(root: root); try paths.initialize(defaults: defaults)
         let loadedDefinition = try DurableFile.load(WorkspaceDefinition.self, from: paths.definition)
         definition = loadedDefinition; id = loadedDefinition.id
@@ -58,7 +58,7 @@ final class WorkspaceModel: ObservableObject, Identifiable {
         restoration = (try? DurableFile.load(Restoration.self, from: paths.restoration)) ?? .init()
         comments = (try? DurableFile.load([CodeComment].self, from: paths.comments)) ?? []
         savedDefinition = try? Data(contentsOf: paths.definition); savedLayout = try? Data(contentsOf: paths.layout)
-        backend = TerminalBackend(paths: paths, executable: AppPaths.tmux, helper: AppPaths.helper, environment: environment)
+        backend = terminalBackend ?? TerminalBackend(paths: paths, executable: AppPaths.tmux, helper: AppPaths.helper, environment: environment)
         git = GitModel(folder: paths.root, environment: environment)
         savedComments = try? Data(contentsOf: paths.comments)
         codeDocument.draftURL = paths.local.appendingPathComponent("editors/code.json")
@@ -98,6 +98,12 @@ final class WorkspaceModel: ObservableObject, Identifiable {
     func addPane(kind: PaneKind = .codex, title: String? = nil, options: CodexOptions? = nil, split: SplitAxis? = nil, prompt: String? = nil) -> UUID? {
         let oldLayout = layout, oldRestoration = restoration
         let pane = PaneDefinition(title: title ?? (kind == .codex ? "Codex \(layout.panes.filter { $0.kind == .codex }.count + 1)" : "Terminal"), kind: kind, options: options ?? definition.defaults)
+        let recoveryURL = paths.terminal(pane.id).appendingPathComponent("recovery.json")
+        do {
+            // Save before publishing the pane: activation, reloads, and retries must
+            // all launch it with the same prompt, even after the creating sheet closes.
+            if let prompt { try TerminalPrompt.save(prompt, recoveryFile: recoveryURL) }
+        } catch { self.error = "Could not prepare the Codex prompt.\n\n" + error.localizedDescription; return nil }
         if let split, let target = restoration.focusedPane ?? layout.panes.first?.id {
             if layout.tree == nil { layout.tree = makeTree(layout.panes.map(\.id)) }
             layout.tree = layout.tree?.splitting(target, with: pane.id, axis: split); layout.automatic = false
@@ -105,7 +111,12 @@ final class WorkspaceModel: ObservableObject, Identifiable {
         else { layout.tree = .pane(pane.id) }
         if split == nil { layout.automatic = true }
         layout.panes.append(pane); restoration.focusedPane = pane.id; restoration.maximizedPane = nil; restoration.selectedTab = "Code"
-        guard saveNow() else { layout = oldLayout; restoration = oldRestoration; return nil }; ensureSession(pane, prompt: prompt, focusWhenReady: true); return pane.id
+        guard saveNow() else {
+            layout = oldLayout; restoration = oldRestoration
+            try? TerminalPrompt.remove(recoveryFile: recoveryURL)
+            return nil
+        }
+        ensureSession(pane, focusWhenReady: true); return pane.id
     }
     func makeTree(_ ids: [UUID]) -> LayoutNode? {
         guard let first = ids.first else { return nil }
