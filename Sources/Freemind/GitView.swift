@@ -21,7 +21,6 @@ struct GitView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 repositoryBar
-                if let error = model.error { message(error, color: .orange) }
                 if let feedback = model.feedback { message(feedback, color: theme.accent) }
                 WorkspaceColumns(initial: 280, minimum: 230, maximum: 400, savedWidth: $workspace.restoration.gitBrowserWidth) {
                     VStack(spacing: 0) {
@@ -108,8 +107,7 @@ struct GitView: View {
     private var canCommit: Bool { model.operation == nil && !workspace.restoration.commitDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.snapshot?.changes.contains(where: { $0.section == .staged }) == true }
     private var repositoryBar: some View {
         HStack(spacing: 12) {
-            Image(systemName: "arrow.triangle.branch").foregroundStyle(theme.accent)
-            Text(model.snapshot?.branch ?? "Reading repository…").font(.system(size: 12, weight: .semibold))
+            GitBranchButton(model: model)
             if let snapshot = model.snapshot {
                 Text("↑\(snapshot.ahead) ↓\(snapshot.behind)").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).help("Compared with the latest fetched upstream state")
                 Text(snapshot.upstream ?? "No upstream").font(.caption).foregroundStyle(.tertiary)
@@ -136,7 +134,7 @@ struct GitView: View {
             .contentShape(Rectangle()).onTapGesture { model.select(change) }
     }
     private func message(_ text: String, color: Color) -> some View {
-        HStack { Text(text.trimmingCharacters(in: .whitespacesAndNewlines)).font(.system(size: 11)).lineLimit(4).textSelection(.enabled); Spacer(); Button { model.error = nil; model.feedback = nil } label: { Image(systemName: "xmark") } }.foregroundStyle(color).padding(10).background(color.opacity(0.07))
+        HStack { Text(text.trimmingCharacters(in: .whitespacesAndNewlines)).font(.system(size: 11)).lineLimit(4).textSelection(.enabled); Spacer(); Button { model.feedback = nil } label: { Image(systemName: "xmark") } }.foregroundStyle(color).padding(10).background(color.opacity(0.07))
     }
     private func commit(push alsoPush: Bool) {
         let message = workspace.restoration.commitDraft

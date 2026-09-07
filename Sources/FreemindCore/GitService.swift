@@ -20,6 +20,16 @@ public struct GitSnapshot: Sendable {
     public var added = 0
     public var deleted = 0
 }
+public struct GitBranch: Identifiable, Equatable, Sendable {
+    public let reference: String
+    public var id: String { reference }
+    public var isRemote: Bool { reference.hasPrefix("refs/remotes/") }
+    public var name: String { String(reference.dropFirst(isRemote ? "refs/remotes/".count : "refs/heads/".count)) }
+}
+public enum GitRepositoryError: LocalizedError {
+    case notRepository
+    public var errorDescription: String? { "This folder is not a Git repository." }
+}
 public struct DiffLine: Identifiable, Equatable, Sendable {
     public var id: Int
     public var kind: String
@@ -74,15 +84,16 @@ public actor GitService {
                                     environment: environment, input: input, timeout: timeout)
     }
     public func repositoryRoot() async throws -> URL {
-        let result = try await git(["rev-parse", "--show-toplevel"], at: folder).checked()
+        let result = try await git(["rev-parse", "--show-toplevel"], at: folder)
+        if result.code != 0, result.error.contains("not a git repository") { throw GitRepositoryError.notRepository }
+        _ = try result.checked()
         let path = result.output.trimmingCharacters(in: .newlines)
         let url = URL(fileURLWithPath: path); root = url; return url
     }
     public func snapshot() async throws -> GitSnapshot {
         let root = try await repositoryRoot()
         let status = try await git(["status", "--porcelain=v1", "-z", "--untracked-files=all"]).checked()
-        let branchResult = try await git(["symbolic-ref", "--short", "HEAD"])
-        let branch = branchResult.code == 0 ? branchResult.output.trimmingCharacters(in: .newlines) : "Detached HEAD"
+        let branch = try await currentBranch()
         let upstreamResult = try await git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
         let upstream = upstreamResult.code == 0 ? upstreamResult.output.trimmingCharacters(in: .newlines) : nil
         let remotes = try await git(["remote"]).checked().output.split(separator: "\n").map(String.init)
@@ -100,6 +111,40 @@ public actor GitService {
             }
         }
         return snapshot
+    }
+    public func currentBranch() async throws -> String {
+        let result = try await git(["symbolic-ref", "--quiet", "HEAD"])
+        if result.code == 1 { return "Detached HEAD" }
+        _ = try result.checked()
+        return String(result.output.trimmingCharacters(in: .newlines).dropFirst("refs/heads/".count))
+    }
+    public func branches() async throws -> [GitBranch] {
+        _ = try await repositoryRoot()
+        let result = try await git(["for-each-ref", "--sort=refname", "--format=%(refname)%00%(symref)", "refs/heads/", "refs/remotes/"]).checked()
+        return result.output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: "\0", omittingEmptySubsequences: false)
+            // Remote HEAD aliases are not branches users can switch to.
+            guard fields.count == 2, fields[1].isEmpty else { return nil }
+            return GitBranch(reference: String(fields[0]))
+        }
+    }
+    public func switchBranch(_ branch: GitBranch) async throws -> String {
+        try await mutate {
+            guard branch.reference.hasPrefix("refs/heads/") || branch.reference.hasPrefix("refs/remotes/"),
+                  !branch.name.isEmpty, !branch.name.hasPrefix("-") else {
+                throw FreemindError.message("Choose a valid branch.")
+            }
+            guard try await self.git(["check-ref-format", branch.reference]).code == 0 else {
+                throw FreemindError.message("‘\(branch.name)’ is not a valid Git branch name.")
+            }
+            guard try await self.git(["show-ref", "--verify", "--quiet", branch.reference]).code == 0 else {
+                throw FreemindError.message("Branch ‘\(branch.name)’ no longer exists. Refresh the branch list and try again.")
+            }
+            // Let Git protect local changes and branches checked out in another worktree.
+            let args = branch.isRemote ? ["switch", "--track", "--", branch.reference] : ["switch", "--no-guess", "--", branch.name]
+            let result = try await self.git(args, timeout: 120).checked()
+            return (result.output + result.error).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
     public static func parseStatus(_ data: Data) -> [GitChange] {
         let records = data.split(separator: 0, omittingEmptySubsequences: false)

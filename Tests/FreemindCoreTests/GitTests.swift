@@ -99,4 +99,138 @@ final class GitTests: XCTestCase {
         _ = try run(["worktree", "add", "-b", "feature", worktree.path])
         let worktreeService = GitService(folder: worktree); let worktreeSnapshot = try await worktreeService.snapshot(); XCTAssertEqual(worktreeSnapshot.branch, "feature")
     }
+    func testBranchListAndLocalSwitchPreserveCompatibleChanges() async throws {
+        try seed()
+        _ = try run(["branch", "feature/🙂-ui"])
+        _ = try run(["tag", "feature/🙂-ui"])
+        try write("base.txt", "local edits\n")
+        _ = try run(["add", "base.txt"])
+        let subfolder = root.appendingPathComponent("subfolder")
+        try FileManager.default.createDirectory(at: subfolder, withIntermediateDirectories: true)
+        let service = GitService(folder: subfolder)
+        let branches = try await service.branches()
+        XCTAssertEqual(branches.map(\.name), ["feature/🙂-ui", "main"])
+        XCTAssertTrue(branches.allSatisfy { !$0.isRemote })
+        let feature = try XCTUnwrap(branches.first { $0.name == "feature/🙂-ui" })
+        _ = try await service.switchBranch(feature)
+        let snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, feature.name)
+        XCTAssertEqual(snapshot.changes.first { $0.path == "base.txt" }?.section, .staged)
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("base.txt"), encoding: .utf8), "local edits\n")
+    }
+    func testBlockedSwitchReportsConflictingChangesAndPreservesBranch() async throws {
+        try seed()
+        _ = try run(["checkout", "-b", "feature"])
+        try write("base.txt", "feature content\n")
+        try write("new.txt", "tracked on feature\n")
+        _ = try run(["add", "."]); _ = try run(["commit", "-m", "Feature"])
+        _ = try run(["checkout", "main"])
+        let service = GitService(folder: root)
+        let branches = try await service.branches()
+        let feature = try XCTUnwrap(branches.first { $0.name == "feature" })
+        try write("base.txt", "unsaved work\n")
+        do { _ = try await service.switchBranch(feature); XCTFail("Must protect local changes") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("base.txt")); XCTAssertTrue(error.localizedDescription.contains("overwritten")) }
+        var snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, "main")
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("base.txt"), encoding: .utf8), "unsaved work\n")
+        _ = try run(["restore", "base.txt"])
+        try write("new.txt", "untracked work\n")
+        do { _ = try await service.switchBranch(feature); XCTFail("Must protect untracked files") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("new.txt")); XCTAssertTrue(error.localizedDescription.contains("overwritten")) }
+        snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, "main")
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("new.txt"), encoding: .utf8), "untracked work\n")
+    }
+    func testRemoteBranchSwitchCreatesTrackingBranchAndOmitsHeadAlias() async throws {
+        try seed()
+        let remote = root.appendingPathComponent("remote.git")
+        _ = try run(["init", "--bare", remote.path]); _ = try run(["remote", "add", "origin", remote.path])
+        _ = try run(["push", "origin", "main", "main:feature/nested"])
+        _ = try run(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"])
+        let service = GitService(folder: root)
+        let branches = try await service.branches()
+        XCTAssertFalse(branches.contains { $0.name == "origin/HEAD" })
+        let branch = try XCTUnwrap(branches.first { $0.name == "origin/feature/nested" })
+        XCTAssertTrue(branch.isRemote)
+        _ = try await service.switchBranch(branch)
+        var snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, "feature/nested")
+        XCTAssertEqual(snapshot.upstream, "origin/feature/nested")
+        _ = try run(["checkout", "main"])
+        do { _ = try await service.switchBranch(branch); XCTFail("An existing local branch must not be reset") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("already exists")) }
+        snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, "main")
+    }
+    func testMissingAndInvalidBranchErrorsDoNotChangeHead() async throws {
+        try seed()
+        let service = GitService(folder: root)
+        _ = try run(["branch", "gone"])
+        let branches = try await service.branches()
+        let gone = try XCTUnwrap(branches.first { $0.name == "gone" })
+        _ = try run(["branch", "-d", "gone"])
+        do { _ = try await service.switchBranch(gone); XCTFail("Deleted branch should fail") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("no longer exists")) }
+        for reference in ["refs/heads/--discard-changes", "refs/tags/main", "refs/heads/@{-1}"] {
+            do { _ = try await service.switchBranch(GitBranch(reference: reference)); XCTFail("Invalid branch should fail") }
+            catch { XCTAssertFalse(error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+        }
+        let snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, "main")
+    }
+    func testBranchCheckedOutInAnotherWorktreeReportsError() async throws {
+        try seed()
+        let worktree = root.appendingPathComponent("worktree")
+        _ = try run(["worktree", "add", "-b", "feature", worktree.path])
+        let service = GitService(folder: root)
+        let branches = try await service.branches()
+        let feature = try XCTUnwrap(branches.first { $0.name == "feature" })
+        do { _ = try await service.switchBranch(feature); XCTFail("Must respect another worktree") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("worktree")) }
+        let snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, "main")
+        let linked = GitService(folder: worktree)
+        _ = try run(["branch", "available"])
+        let linkedBranches = try await linked.branches()
+        _ = try await linked.switchBranch(try XCTUnwrap(linkedBranches.first { $0.name == "available" }))
+        let linkedSnapshot = try await linked.snapshot()
+        XCTAssertEqual(linkedSnapshot.branch, "available")
+    }
+    func testUnbornAndDetachedBranchSelection() async throws {
+        let service = GitService(folder: root)
+        let empty = try await service.branches()
+        XCTAssertTrue(empty.isEmpty)
+        var snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, "main")
+        try seed()
+        _ = try run(["checkout", "--detach"])
+        snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, "Detached HEAD")
+        let branches = try await service.branches()
+        _ = try await service.switchBranch(try XCTUnwrap(branches.first { $0.name == "main" }))
+        snapshot = try await service.snapshot()
+        XCTAssertEqual(snapshot.branch, "main")
+    }
+    func testCurrentBranchReadsExternalSwitchInLinkedWorktree() async throws {
+        try seed()
+        let worktree = root.appendingPathComponent("worktree")
+        _ = try run(["worktree", "add", "-b", "feature", worktree.path])
+        let service = GitService(folder: worktree)
+        var branch = try await service.currentBranch()
+        XCTAssertEqual(branch, "feature")
+        _ = try run(["checkout", "-b", "external"], at: worktree)
+        branch = try await service.currentBranch()
+        XCTAssertEqual(branch, "external")
+    }
+    func testInvalidRepositoryAndUnreadableStatusAreDistinctErrors() async throws {
+        try seed()
+        let service = GitService(folder: root)
+        try Data("broken index".utf8).write(to: root.appendingPathComponent(".git/index"))
+        do { _ = try await service.snapshot(); XCTFail("Corrupt index must be reported") }
+        catch { XCTAssertFalse(error is GitRepositoryError); XCTAssertTrue(error.localizedDescription.contains("index")) }
+        try FileManager.default.removeItem(at: root.appendingPathComponent(".git"))
+        do { _ = try await service.snapshot(); XCTFail("Missing repository must be reported") }
+        catch { XCTAssertTrue(error is GitRepositoryError) }
+    }
 }

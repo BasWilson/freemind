@@ -149,6 +149,7 @@ struct WorkspaceView: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         VStack(spacing: 0) {
+            GitErrorBanner(model: workspace.git)
             if let error = workspace.error {
                 HStack { Image(systemName: "exclamationmark.triangle"); Text(error).font(.caption); Spacer(); Button("Reload") { workspace.reloadFromDisk() }; Button { workspace.error = nil } label: { Image(systemName: "xmark") } }
                     .foregroundStyle(.orange).padding(10).background(Color.orange.opacity(0.08))
@@ -162,8 +163,11 @@ struct WorkspaceView: View {
         .background(theme.background).tint(theme.accent).frame(minWidth: 660, minHeight: 460)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Text(workspace.definition.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    .padding(.horizontal, 8).padding(.vertical, 5).help(workspace.paths.root.path)
+                HStack(spacing: 10) {
+                    Text(workspace.definition.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        .help(workspace.paths.root.path)
+                    GitBranchButton(model: workspace.git)
+                }.padding(.horizontal, 8).padding(.vertical, 5)
             }
             ToolbarItem(placement: .principal) {
                 WorkspaceTabs(selection: $workspace.restoration.selectedTab).onChange(of: workspace.restoration.selectedTab) { _, _ in workspace.saveSoon() }
@@ -191,6 +195,16 @@ struct WorkspaceView: View {
             if !AppStore.shared.quitting && standalone { workspace.restoration.windowOpen = false; workspace.saveNow() }
         }))
         .onAppear { workspace.activate() }
+        .task {
+            // Linked worktrees can keep HEAD outside the folder watched for file changes.
+            while !Task.isCancelled {
+                await workspace.git.refreshCurrentBranch()
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await workspace.git.refresh() }
+        }
         .onChange(of: workspace.restoration) { _, _ in workspace.saveSoon() }
 
     }

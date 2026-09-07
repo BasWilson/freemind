@@ -41,6 +41,8 @@ Opening or closing files and changing the automatic grid preserve the existing n
 
 The Git tab shows staged, unstaged, and untracked files, unified or split diffs, staging, commits, and pushes. Commits include staged changes and use the repository's Git identity, hooks, signing, and authentication. First push asks for the remote and branch. A failed push keeps the successful local commit. Fetch refreshes remote tracking information. If your workspace is a subfolder, Git operations apply to the displayed repository root.
 
+The active Git branch stays beside the workspace name in the top bar on every tab. Click it, or the branch button in the Git tab, to search and switch local or fetched remote branches. Selecting a remote branch creates a local tracking branch. Git blocks switches that would overwrite local changes or use a branch already checked out in another worktree. Errors remain visible across tabs with selectable, scrollable details.
+
 Notes are ordinary Markdown files with autosave and preview. Conflicting external edits preserve the local draft and offer Reload or Save a Copy.
 
 ## Keyboard shortcuts
