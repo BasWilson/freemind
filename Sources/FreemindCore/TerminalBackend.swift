@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 public struct TerminalSnapshot: Sendable {
     public var paneID: UUID
@@ -135,7 +139,7 @@ public actor TerminalBackend {
             if manager.fileExists(atPath: home.appendingPathComponent("auth.json").path) { arguments += ["-c", "cli_auth_credentials_store=\"file\""] }
             if let id = recovery.conversationID { arguments = ["resume", id] + arguments }
         } else {
-            program = environment["SHELL"] ?? "/bin/zsh"; arguments = ["-l"]
+            program = Self.resolveShell(environment: environment); arguments = ["-l"]
         }
         let request = LaunchRequest(executable: program, arguments: arguments, environment: env, directory: cwd.path,
                                     recoveryFile: recoveryURL.path, initialPrompt: pendingPrompt)
@@ -177,6 +181,14 @@ public actor TerminalBackend {
             config += "\n" + hooks.trustTOML
         } else { try? fm.removeItem(at: home.appendingPathComponent("hooks.json")) }
         try Data(config.utf8).write(to: home.appendingPathComponent("config.toml"), options: .atomic)
+    }
+    public static func resolveShell(environment: [String: String]) -> String {
+        if let shell = environment["SHELL"], shell.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: shell) { return shell }
+        #if os(macOS)
+        return "/bin/zsh"
+        #else
+        return "/bin/sh"
+        #endif
     }
     public static func resolveCodex(_ explicit: String, environment: [String: String]) throws -> String {
         if !explicit.isEmpty {

@@ -1,6 +1,14 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 
 public enum HookConfiguration {
     public static let events = ["SessionStart": "session_start", "SessionEnd": "session_end", "UserPromptSubmit": "user_prompt_submit",

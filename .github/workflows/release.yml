@@ -70,9 +70,57 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  build-linux:
+    name: Build Linux ${{ matrix.architecture }}
+    if: startsWith(github.ref, 'refs/tags/v') && vars.LINUX_PUBLIC_ED_KEY != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: x86_64
+          - runner: ubuntu-24.04-arm
+            architecture: aarch64
+    runs-on: ${{ matrix.runner }}
+    container: swift:6.3.3-noble
+    timeout-minutes: 45
+    env:
+      FREEMIND_UPDATE_REPOSITORY: ${{ github.repository }}
+      LINUX_PUBLIC_ED_KEY: ${{ vars.LINUX_PUBLIC_ED_KEY }}
+      LINUX_PRIVATE_ED_KEY: ${{ secrets.LINUX_PRIVATE_ED_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install native dependencies
+        run: apt-get update && apt-get install -y tmux git pkg-config libgtk-4-dev libvte-2.91-gtk4-dev libgtksourceview-5-dev python3 openssl
+      - name: Test core, signed updates and tamper rejection
+        run: |
+          bash Scripts/test-linux.sh
+          python3 -m unittest discover -s Tests/LinuxUpdateTests -v
+      - name: Build and sign Linux release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          export FREEMIND_RELEASE_VERSION="${RELEASE_TAG#v}"
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          test "$(uname -m)" = '${{ matrix.architecture }}'
+          bash Scripts/package-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.architecture }}
+          path: |
+            dist/*Linux*.tar.gz
+            dist/*Linux*.sha256
+            dist/linux-*.json
+            dist/linux-*.json.sig
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, build-linux]
+    if: always() && !cancelled() && needs.build.result == 'success' && (needs['build-linux'].result == 'success' || needs['build-linux'].result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -81,7 +129,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ github.ref_name }}
+      LINUX_BUILT: ${{ needs['build-linux'].result == 'success' }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -95,15 +147,37 @@ jobs:
             test -s "Freemind-${RELEASE_TAG#v}-macOS-$architecture.zip"
             test -s "Freemind-${RELEASE_TAG#v}-macOS-$architecture-update.zip"
           done
+          if [ "$LINUX_BUILT" = true ]; then
+            for architecture in x86_64 aarch64; do
+              test -s "Freemind-${RELEASE_TAG#v}-Linux-$architecture.tar.gz"
+              test -s "linux-$architecture.json"
+              test -s "linux-$architecture.json.sig"
+            done
+          fi
           sha256sum --check ./*.sha256
+      - name: Create one-command Linux installer and installation notes
+        env:
+          FREEMIND_UPDATE_REPOSITORY: ${{ github.repository }}
+          LINUX_PUBLIC_ED_KEY: ${{ vars.LINUX_PUBLIC_ED_KEY }}
+        run: |
+          export FREEMIND_RELEASE_VERSION="${RELEASE_TAG#v}"
+          arguments=()
+          if [ "$LINUX_BUILT" = true ]; then
+            python3 Scripts/build-linux-installer.py release/install.sh
+            bash -n release/install.sh
+            bash release/install.sh --help
+            arguments+=(--linux)
+          fi
+          python3 Scripts/release-notes.py --repository "$GH_REPO" --version "$FREEMIND_RELEASE_VERSION" "${arguments[@]}" --output release/INSTALL.md
       - name: Publish complete release
         run: |
           # A failed upload leaves a draft; reruns may resume that draft.
           if gh release view "$RELEASE_TAG" --json isDraft > existing-release.json 2>/dev/null; then
             jq -e '.isDraft == true' existing-release.json > /dev/null || { echo 'This version is already published. Push a new version tag.'; exit 1; }
           else
-            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Freemind ${RELEASE_TAG#v}" --generate-notes
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Freemind ${RELEASE_TAG#v}" --notes-file release/INSTALL.md
           fi
+          gh release edit "$RELEASE_TAG" --notes-file release/INSTALL.md
           gh release upload "$RELEASE_TAG" release/* --clobber
           # Let GitHub select latest by semantic version, including on reruns
           # and when deliberately publishing an older maintenance release.

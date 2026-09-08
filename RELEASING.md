@@ -1,6 +1,10 @@
 # GitHub Releases and automatic updates
 
-Freemind uses [Sparkle](https://sparkle-project.org/documentation/) to check for updates daily, download signed updates, and install them when the app quits. Users can change this in Settings or choose **Freemind → Check for Updates…**. Relaunching goes through Freemind's existing save/checkpoint path; terminal sessions keep running.
+Freemind hosts its installers and signed update feeds on GitHub Releases. macOS
+uses [Sparkle](https://sparkle-project.org/documentation/); Linux uses signed
+per-user archives and a single-command installer. Both support checking daily,
+downloading updates and installing when the app quits. Terminal sessions keep
+running through the existing save/checkpoint path.
 
 ## One-time setup
 
@@ -17,6 +21,41 @@ Freemind uses [Sparkle](https://sparkle-project.org/documentation/) to check for
 3. Ensure GitHub Actions is enabled. The workflow uses the repository's built-in `GITHUB_TOKEN` with `contents: write` only for the publishing job. No hosting service, Pages site, or personal access token is needed by the workflow.
 
 The release repository is inferred from `github.repository`. No owner or repository name needs to be hardcoded in the app. Installed builds retain that repository URL, so keep it stable after the first release.
+
+### Enable Linux releases
+
+On Linux, configure the separate Linux signing key:
+
+```sh
+gh auth login
+python3 Scripts/setup-linux-updates.py BasWilson/freemind
+```
+
+The setup script creates or reuses
+`~/.local/share/freemind-release/linux-ed25519.key`, keeps it readable only by
+your user, and sets Actions variable `LINUX_PUBLIC_ED_KEY` and secret
+`LINUX_PRIVATE_ED_KEY`. Back up that file securely; use `--key PATH` to restore an
+existing key. The script refuses to rotate a configured key automatically.
+It never prints the private key or puts it in a command-line argument.
+
+With the Linux public key configured, every version tag also builds x86_64 and
+ARM64 Linux archives on Ubuntu 24.04 runners. The publishing job checks that both
+archives and signed manifests exist, generates `install.sh` with the pinned
+public key, and publishes installation instructions as the release body and
+`INSTALL.md`. It waits for all configured platforms to pass. Without a Linux
+public key, the workflow continues to release macOS only.
+
+After the first Linux release, users install with:
+
+```sh
+curl -fsSL https://github.com/BasWilson/freemind/releases/latest/download/install.sh | bash
+```
+
+The installer detects the CPU architecture, installs missing dependencies via
+pacman or apt, verifies the signed archive and creates the desktop launcher.
+Python 3.11+ and curl must already be installed. Freemind itself never installs as
+root. See [Linux installation and packaging](Linux/README.md) for requirements,
+custom prefixes, manual archives and the local packaging test.
 
 ## Publish a version
 
@@ -35,7 +74,12 @@ The **Release Freemind** Action:
 2. Bundles Sparkle and its installer services, tmux, icons, and licenses.
 3. Creates first-install ZIPs, app-only update ZIPs, and SHA-256 checksums.
 4. Signs the update archives and architecture-specific XML feeds with your Ed25519 key, then validates their metadata and feed signatures.
-5. Uploads both architectures to a draft release and publishes it once every asset is present. A failed upload leaves a resumable draft; rerun the failed job. Published versions cannot be overwritten by this workflow.
+5. When Linux signing is configured, builds and tests both Linux architectures,
+   bundles their Swift runtime, and signs their bounded JSON manifests.
+6. Uploads all architectures, installation instructions and the Linux installer
+   to a draft release, then publishes it once every asset is present. A failed
+   upload leaves a resumable draft; rerun the failed job. Published versions
+   cannot be overwritten by this workflow.
 
 Download `Freemind-VERSION-macOS-arm64.zip` for Apple Silicon or `Freemind-VERSION-macOS-x86_64.zip` for Intel. The `-update.zip` assets are used by Sparkle. Feeds are served directly from:
 

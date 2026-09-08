@@ -94,7 +94,7 @@ final class GitTests: XCTestCase {
         let large = try await service.diff(try XCTUnwrap(snapshot.changes.first { $0.path == "large.txt" }))
         XCTAssertTrue(binary.binary); XCTAssertTrue(large.truncated)
         let sub = root.appendingPathComponent("sub"); try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
-        let nested = GitService(folder: sub); let nestedRoot = try await nested.repositoryRoot(); XCTAssertEqual(nestedRoot.resolvingSymlinksInPath(), root.resolvingSymlinksInPath())
+        let nested = GitService(folder: sub); let nestedRoot = try await nested.repositoryRoot(); XCTAssertEqual(nestedRoot.resolvingSymlinksInPath().path, root.resolvingSymlinksInPath().path)
         let worktree = root.appendingPathComponent("worktree")
         _ = try run(["worktree", "add", "-b", "feature", worktree.path])
         let worktreeService = GitService(folder: worktree); let worktreeSnapshot = try await worktreeService.snapshot(); XCTAssertEqual(worktreeSnapshot.branch, "feature")

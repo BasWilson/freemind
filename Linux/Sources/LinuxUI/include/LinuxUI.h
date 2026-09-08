@@ -1,0 +1,70 @@
+#ifndef FREEMIND_LINUX_UI_H
+#define FREEMIND_LINUX_UI_H
+
+typedef void (*FMEvent)(const char *action, const char *value);
+typedef void (*FMCallback)(void *context);
+int fm_run(FMEvent event);
+// Always queued on GTK's main context, including calls from worker threads.
+void fm_post(FMCallback callback, void *context);
+void fm_workspace(const char *title, const char *path);
+void fm_error(const char *message);
+void fm_add_pane(const char *id, const char *title, const char *kind, const char *tmux,
+                 const char *socket, const char *session, const char *directory);
+void fm_remove_pane(const char *id);
+void fm_move_pane(const char *id, int position);
+void fm_pane_status(const char *id, const char *status);
+void fm_quit(void);
+int fm_system_dark(void);
+void fm_appearance(const char *css, const char *terminal_colors, double opacity);
+void fm_settings_begin(void);
+void fm_settings_close(void);
+void fm_settings_page(const char *id, const char *title);
+void fm_settings_section(const char *title, const char *description);
+void fm_settings_choice(const char *key, const char *label, const char *ids, const char *titles, const char *selected);
+void fm_settings_text(const char *key, const char *label, const char *value, const char *placeholder, int multiline);
+void fm_settings_toggle(const char *key, const char *label, int value);
+void fm_settings_range(const char *key, const char *label, double value, double minimum, double maximum);
+void fm_settings_button(const char *title, const char *action, int enabled);
+void fm_settings_end(const char *page);
+void fm_settings_message(const char *text, int error);
+void fm_update_status(const char *text, int can_check, int can_download);
+void fm_open_uri(const char *uri);
+void fm_workspace_list_clear(void);
+void fm_workspace_list_add(const char *path, const char *title, int selected, int pinned, int available);
+void fm_window_size(int width, int height);
+void fm_pane_window_size(const char *id, int width, int height);
+void fm_workspace_window(const char *executable, const char *path);
+void fm_source_colors(const char *scheme);
+void fm_palette_clear(void);
+void fm_sidebar(int width, int visible);
+void fm_branch(const char *name);
+void fm_selected_tab(const char *tab);
+void fm_content_show(const char *tab, int files, int file_width, int git_width, int notes_width, double editor_fraction);
+void fm_files_clear(void);
+void fm_file_row(const char *path, const char *title, int depth, int directory, int expanded, int selected);
+void fm_watch(const char *path);
+void fm_watch_clear(void);
+void fm_document(const char *kind, const char *path, const char *text, int cursor);
+void fm_document_status(const char *kind, const char *message, int dirty);
+void fm_notes_clear(void);
+void fm_note_row(const char *name, int selected);
+void fm_note_preview(const char *markup);
+void fm_git_clear(const char *summary, const char *commit);
+void fm_git_row(const char *id, const char *path, const char *status, const char *section, int selected);
+void fm_git_diff(const char *text, int split);
+void fm_git_branches(const char *ids, const char *names, const char *selected);
+void fm_git_message(const char *message);
+void fm_prompt(const char *title, const char *description, const char *value, const char *action);
+void fm_text_window(const char *title, const char *text);
+void fm_palette_begin(const char *title);
+void fm_palette_item(const char *title, const char *detail, const char *action, const char *value);
+void fm_palette_end(void);
+void fm_pane_title(const char *id, const char *title);
+void fm_pane_focus(const char *id);
+void fm_pane_detach(const char *id);
+void fm_pane_maximize(const char *id);
+void fm_pane_font(const char *id, double size);
+void fm_pane_ratio(const char *id, double ratio);
+void fm_pane_layout(const char *tree);
+void fm_notify(const char *id, const char *title, const char *body);
+#endif

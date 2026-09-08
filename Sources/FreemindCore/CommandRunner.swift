@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 
 public struct CommandResult: Sendable {
     public let code: Int32
@@ -41,16 +45,24 @@ private final class DataBox: @unchecked Sendable {
 public enum CommandRunner {
     public static func run(_ executable: String, _ arguments: [String] = [], cwd: URL? = nil,
                            environment: [String: String]? = nil, input: Data? = nil, timeout: Double = 30) async throws -> CommandResult {
+        #if os(Linux)
+        return try await LinuxCommandRunner.run(executable, arguments, cwd: cwd, environment: environment, input: input, timeout: timeout)
+        #else
         let control = ProcessControl()
         return try await withTaskCancellationHandler {
             try await Task.detached(priority: .userInitiated) {
                 try sync(executable, arguments, cwd: cwd, environment: environment, input: input, timeout: timeout, control: control)
             }.value
         } onCancel: { control.cancel() }
+        #endif
     }
     public static func sync(_ executable: String, _ arguments: [String] = [], cwd: URL? = nil,
                             environment: [String: String]? = nil, input: Data? = nil, timeout: Double = 30) throws -> CommandResult {
+        #if os(Linux)
+        return try LinuxCommandRunner.sync(executable, arguments, cwd: cwd, environment: environment, input: input, timeout: timeout)
+        #else
         try sync(executable, arguments, cwd: cwd, environment: environment, input: input, timeout: timeout, control: ProcessControl())
+        #endif
     }
     private static func sync(_ executable: String, _ arguments: [String], cwd: URL?, environment: [String: String]?, input: Data?, timeout: Double, control: ProcessControl) throws -> CommandResult {
         let process = Process(), out = Pipe(), err = Pipe(), stdin = Pipe()

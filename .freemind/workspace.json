@@ -1,0 +1,26 @@
+{
+  "defaults" : {
+    "additionalDirectories" : [
+
+    ],
+    "approval" : "",
+    "configOverrides" : [
+
+    ],
+    "executable" : "",
+    "extraArguments" : "",
+    "hooks" : true,
+    "inline" : true,
+    "localProvider" : "",
+    "model" : "",
+    "profile" : "",
+    "reasoning" : "",
+    "sandbox" : "",
+    "trustWorkspace" : true,
+    "webSearch" : false
+  },
+  "id" : "20AA72AA-5685-41E6-B947-5926105D27CC",
+  "name" : "freemind",
+  "pinned" : false,
+  "schemaVersion" : 1
+}

@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+freemind_release=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
+export LD_LIBRARY_PATH="$freemind_release/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$freemind_release/freemind-linux" "$@"

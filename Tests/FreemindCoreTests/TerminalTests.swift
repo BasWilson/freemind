@@ -3,13 +3,12 @@ import XCTest
 
 final class TerminalTests: XCTestCase {
     func testExitEventDistinguishesSuccessFailureAndSurvivingSessions() async throws {
-        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("freemind exit 'test " + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let paths = WorkspacePaths(root: root); try paths.initialize()
         var env = ProcessInfo.processInfo.environment; env["SHELL"] = "/bin/sh"
-        let backend = TerminalBackend(paths: paths, executable: repo.appendingPathComponent("Resources/bin/tmux").path,
-                                      helper: repo.appendingPathComponent(".build/debug/freemind-helper").path, environment: env)
+        let backend = TerminalBackend(paths: paths, executable: try TestExecutables.tmux(environment: env),
+                                      helper: try TestExecutables.helper(environment: env), environment: env)
         let success = PaneDefinition(title: "Normal exit", kind: .shell)
         let failed = PaneDefinition(title: "Failed exit", kind: .shell)
         let survivor = PaneDefinition(title: "Still running", kind: .shell)
@@ -34,7 +33,8 @@ final class TerminalTests: XCTestCase {
             let normal = try XCTUnwrap(snapshots.first { $0.paneID == success.id })
             let failure = try XCTUnwrap(snapshots.first { $0.paneID == failed.id })
             let live = try XCTUnwrap(snapshots.first { $0.paneID == survivor.id })
-            XCTAssertTrue(normal.exitedSuccessfully)
+            let diagnostic = try await backend.capture(success.id)
+            XCTAssertTrue(normal.exitedSuccessfully, "Screen: \(diagnostic)")
             XCTAssertFalse(failure.exitedSuccessfully); XCTAssertEqual(failure.exitStatus, 7)
             XCTAssertFalse(live.exitedSuccessfully); XCTAssertTrue(live.running); XCTAssertNil(live.exitStatus)
             let output = try await backend.capture(success.id)
@@ -49,13 +49,12 @@ final class TerminalTests: XCTestCase {
         } catch { await backend.stopAll(); try? FileManager.default.removeItem(at: root); throw error }
     }
     func testSessionSurvivesClientsAndRecoversDirectoryAfterServerLoss() async throws {
-        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("freemind-terminal-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("nested"), withIntermediateDirectories: true)
         let paths = WorkspacePaths(root: root); try paths.initialize()
         var env = ProcessInfo.processInfo.environment; env["SHELL"] = "/bin/sh"
-        let backend = TerminalBackend(paths: paths, executable: repo.appendingPathComponent("Resources/bin/tmux").path,
-                                      helper: repo.appendingPathComponent(".build/debug/freemind-helper").path, environment: env)
+        let backend = TerminalBackend(paths: paths, executable: try TestExecutables.tmux(environment: env),
+                                      helper: try TestExecutables.helper(environment: env), environment: env)
         let pane = PaneDefinition(title: "Persistent shell", kind: .shell)
         do {
             try await backend.start(pane)
@@ -73,8 +72,8 @@ final class TerminalTests: XCTestCase {
             let recovery = try await backend.checkpoint(pane, running: first)
             XCTAssertEqual(recovery.workingDirectory, "nested", "cwd=\(first.cwd); output=\(output)")
             // A new frontend instance must adopt the existing server/session instead of relaunching.
-            let reopened = TerminalBackend(paths: paths, executable: repo.appendingPathComponent("Resources/bin/tmux").path,
-                                           helper: repo.appendingPathComponent(".build/debug/freemind-helper").path, environment: env)
+            let reopened = TerminalBackend(paths: paths, executable: try TestExecutables.tmux(environment: env),
+                                           helper: try TestExecutables.helper(environment: env), environment: env)
             try await reopened.start(pane)
             let secondSnapshots = await reopened.snapshot()
             let second = try XCTUnwrap(secondSnapshots.first { $0.paneID == pane.id })
@@ -104,6 +103,20 @@ final class TerminalTests: XCTestCase {
         XCTAssertEqual(env["FORCE_COLOR"], "3")
         XCTAssertEqual(env["PATH"], "/bin")
     }
+    func testShellDiscoveryIgnoresInvalidInheritedShell() {
+        XCTAssertEqual(TerminalBackend.resolveShell(environment: ["SHELL": "/bin/sh"]), "/bin/sh")
+        let fallback = TerminalBackend.resolveShell(environment: [:])
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: fallback))
+        for invalid in ["", "bash", "/nonexistent/freemind-shell"] {
+            XCTAssertEqual(TerminalBackend.resolveShell(environment: ["SHELL": invalid]), fallback)
+        }
+    }
+    func testSocketHashMatchesAcrossPlatforms() async {
+        let backend = TerminalBackend(paths: WorkspacePaths(root: URL(fileURLWithPath: "/tmp/freemind-hash-fixture")),
+                                      executable: "/usr/bin/false", helper: "/usr/bin/false", environment: [:])
+        let socket = await backend.socket
+        XCTAssertTrue(socket.hasSuffix("/e57ec1422f0313773a06.sock"))
+    }
     func testDeadPaneCannotOverwriteWorkingDirectoryOrHookIdentity() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("freemind-recovery-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -131,6 +144,9 @@ final class TerminalTests: XCTestCase {
         XCTAssertTrue(args.contains("--search")); XCTAssertTrue(args.contains("a b")); XCTAssertFalse(args.contains("--dangerously-bypass-approvals-and-sandbox"))
         let hooks = try HookConfiguration.make(helper: "/Applications/Freemind Test.app/helper", home: URL(fileURLWithPath: "/tmp/pane-home"))
         XCTAssertTrue(hooks.trustTOML.contains("/tmp/pane-home/hooks.json:session_start:0:0"))
+        // Independently calculated from Codex's canonical JSON: both CryptoKit
+        // and Swift Crypto must preserve the existing hook trust identity.
+        XCTAssertTrue(hooks.trustTOML.contains("sha256:9ba2bcd3cacf2bcd2efb0b16b00009180a04b1f637f27b7a51a2c203266a124c"))
         XCTAssertFalse(hooks.trustTOML.contains("bypass"))
     }
 }
@@ -138,18 +154,17 @@ final class TerminalTests: XCTestCase {
 extension TerminalTests {
     func testLiveInstalledCodexColorTrustAndConversationResume() async throws {
         guard ProcessInfo.processInfo.environment["FREEMIND_LIVE_CODEX"] == "1" else { throw XCTSkip("Opt-in integration with the user's installed Codex") }
-        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("freemind-live-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let paths = WorkspacePaths(root: root); try paths.initialize()
         var env = ProcessInfo.processInfo.environment
-        let shell = try await CommandRunner.run("/bin/zsh", ["-lic", "/usr/bin/env -0"]).checked()
+        let shell = try await CommandRunner.run(TerminalBackend.resolveShell(environment: env), ["-lic", "/usr/bin/env -0"]).checked()
         for pair in shell.output.split(separator: "\0") {
             guard let index = pair.firstIndex(of: "=") else { continue }
             env[String(pair[..<index])] = String(pair[pair.index(after: index)...])
         }
-        let backend = TerminalBackend(paths: paths, executable: repo.appendingPathComponent("Resources/bin/tmux").path,
-                                      helper: repo.appendingPathComponent("dist/Freemind.app/Contents/MacOS/freemind-helper").path, environment: env)
+        let backend = TerminalBackend(paths: paths, executable: try TestExecutables.tmux(environment: env),
+                                      helper: try TestExecutables.helper(environment: env), environment: env)
         var options = CodexOptions(); options.reasoning = "low"
         let pane = PaneDefinition(title: "Live integration", options: options)
         do {
@@ -197,8 +212,9 @@ extension TerminalTests {
             XCTAssertTrue(output.contains("FREEMIND_LIVE_READY"), "The resumed TUI must show the original conversation")
             XCTAssertFalse(output.contains("Do you trust the contents"))
             let record = "Live Codex verification: existing authentication, generated hook trust, automatic workspace trust, ANSI output, completed response, and exact conversation resume passed.\nConversation: \(identity)\n"
-            try Data(record.utf8).write(to: repo.appendingPathComponent(".build-support/live-codex-verification.txt"), options: .atomic)
+            try FileManager.default.createDirectory(at: TestExecutables.repository.appendingPathComponent(".build-support"), withIntermediateDirectories: true)
+            try Data(record.utf8).write(to: TestExecutables.repository.appendingPathComponent(".build-support/live-codex-verification.txt"), options: .atomic)
             await backend.stopAll(); try? FileManager.default.removeItem(at: root)
-        } catch { await backend.stopAll(); try? Data(root.path.utf8).write(to: repo.appendingPathComponent(".build-support/failed-live-root.txt")); throw error }
+        } catch { await backend.stopAll(); try? Data(root.path.utf8).write(to: TestExecutables.repository.appendingPathComponent(".build-support/failed-live-root.txt")); throw error }
     }
 }

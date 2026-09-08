@@ -1,8 +1,70 @@
 # Freemind
 
-A local macOS workspace for Codex CLI terminals, files, Git, and Markdown notes. Built with SwiftUI and AppKit. Requires macOS 14 or newer; macOS 26 adds native Liquid Glass. Freemind has no account. Install and sign in to Codex CLI separately.
+A local workspace for Codex CLI terminals, files, Git, and Markdown notes. The Mac app uses SwiftUI and AppKit; the Linux frontend uses GTK4, VTE and GtkSourceView. The Mac app requires macOS 14 or newer; macOS 26 adds native Liquid Glass. Freemind has no account. Install and sign in to Codex CLI separately.
 
-## Build and launch
+## Install
+
+Download builds from [GitHub Releases](https://github.com/BasWilson/freemind/releases/latest).
+
+### Linux / Omarchy
+
+Once the first Linux release is published, install with one command:
+
+```sh
+curl -fsSL https://github.com/BasWilson/freemind/releases/latest/download/install.sh | bash
+```
+
+Run this as your normal desktop user. The installer detects Intel/AMD (`x86_64`)
+or ARM64 (`aarch64`), installs missing dependencies on Arch/Omarchy or Ubuntu
+24.04+, verifies the signed download, and adds **Freemind** to your app launcher.
+No compiler or source checkout is needed. Python 3.11+ and curl must be installed;
+only dependency installation requests sudo. Freemind installs under
+`~/.local/share/freemind`, with a command at `~/.local/bin/freemind`.
+
+Open **Freemind** from the app launcher or run `freemind /path/to/workspace`.
+Updates are available in Settings and can download automatically and install on
+quit. Install and sign in to Codex CLI separately.
+
+To inspect the script first or choose a custom installation folder:
+
+```sh
+curl -fL https://github.com/BasWilson/freemind/releases/latest/download/install.sh -o freemind-install.sh
+less freemind-install.sh
+bash freemind-install.sh --prefix "$HOME/Applications/Freemind"
+```
+
+Use `--no-deps` to check dependencies without invoking a package manager. Running
+the installer again upgrades an existing installation or keeps its current/newer
+version. Workspaces, settings and surviving terminal sessions remain intact.
+
+### macOS
+
+Download the `macOS-arm64.zip` asset for Apple Silicon or `macOS-x86_64.zip` for
+Intel from [the latest release](https://github.com/BasWilson/freemind/releases/latest).
+Unzip, move Freemind into Applications and open it. Requires macOS 14+.
+The app is locally signed without Apple notarization; first launch may require
+**System Settings → Privacy & Security → Open Anyway**. Future releases use the
+built-in signed updater.
+
+## Linux features and development
+
+The native Linux frontend supports multiple workspaces, resizable sidebars and
+terminal splits, a searchable file tree and source editor, Git, Markdown notes,
+settings and signed updates. Shell sessions survive workspace switching and quit.
+Open settings with **Ctrl+,** and commands with **Ctrl+Shift+K**. See
+[Linux setup and releases](Linux/README.md) and
+[parity/validation coverage](plans/linux-parity-checklist.md).
+
+```sh
+bash Scripts/build-linux.sh
+bash Scripts/run-linux.sh /path/to/workspace
+```
+
+See [the Linux port plan](plans/linux-omarchy-port.md) for dependencies, the
+verified ARM development environment, keyboard shortcuts, tests, and remaining
+work.
+
+## Build and launch on macOS
 
 Requires Xcode 26 (including Icon Composer), Swift, and the command line tools:
 
@@ -27,7 +89,7 @@ The app is locally signed, without Developer ID signing or Apple notarization. O
 
 Release builds check for updates automatically, download signed updates, and install them when you quit. Use **Freemind → Check for Updates…** or change update preferences in Settings. Local development builds leave updating disabled.
 
-The included GitHub Action builds Apple Silicon and Intel releases when you push a version tag. It hosts the ZIPs and signed update feeds directly on your public GitHub repository. See [RELEASING.md](RELEASING.md) for the one-time signing-key setup and release commands. Existing installations need one manual upgrade to the first release with updater support.
+The included GitHub Action builds Apple Silicon and Intel releases when you push a version tag, plus Linux x86_64 and ARM64 when Linux signing is configured. It hosts the archives, single-command Linux installer, installation instructions and signed update feeds directly on GitHub Releases. See [RELEASING.md](RELEASING.md) for the one-time signing-key setup and release commands. Existing installations need one manual upgrade to the first release with updater support.
 
 ## Working
 

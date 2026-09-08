@@ -1,0 +1,39 @@
+name: Build and test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    container: swift:6.3.3-noble
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: apt-get update && apt-get install -y tmux git pkg-config libgtk-4-dev libvte-2.91-gtk4-dev libgtksourceview-5-dev
+      - name: Test core and helper
+        run: bash Scripts/test-linux.sh
+      - name: Build GTK frontend
+        run: bash Scripts/build-linux.sh
+      - name: Test signed Linux updates
+        run: python3 -m unittest discover -s Tests/LinuxUpdateTests -v
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build tmux backend
+        run: bash Scripts/build-backend.sh
+      - name: Test macOS and shared code
+        run: swift test --disable-sandbox --cache-path .build/cache
