@@ -66,6 +66,13 @@ public enum CommandRunner {
     }
     private static func sync(_ executable: String, _ arguments: [String], cwd: URL?, environment: [String: String]?, input: Data?, timeout: Double, control: ProcessControl) throws -> CommandResult {
         let process = Process(), out = Pipe(), err = Pipe(), stdin = Pipe()
+        #if os(macOS)
+        // A child can exit before consuming its input. Return EPIPE to the writer
+        // instead of delivering SIGPIPE to the whole app (or XCTest process).
+        if input != nil, fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == -1 {
+            throw FreemindError.message("Could not configure command input: \(String(cString: strerror(errno)))")
+        }
+        #endif
         process.executableURL = URL(fileURLWithPath: executable); process.arguments = arguments
         process.currentDirectoryURL = cwd; process.environment = environment ?? ProcessInfo.processInfo.environment
         process.standardOutput = out; process.standardError = err

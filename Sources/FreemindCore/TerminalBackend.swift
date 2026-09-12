@@ -129,10 +129,12 @@ public actor TerminalBackend {
             env["CODEX_HOME"] = home.path
             env["CODEX_SQLITE_HOME"] = home.path
             arguments = try pane.options.arguments()
+            #if os(macOS)
             // The TUI emits these only for completion and actual user prompts.
             // OSC 9 lets Freemind own both the sound and the attention indicator.
             arguments += ["-c", "tui.notification_method=\"osc9\"", "-c", "tui.notification_condition=\"always\"",
                           "-c", "tui.notifications=[\"agent-turn-complete\",\"approval-requested\",\"plan-mode-prompt\"]"]
+            #endif
             if pane.options.automaticallyTrustWorkspace {
                 var trustedPaths = Set([paths.root.path, cwd.path])
                 if let result = try? await CommandRunner.run("/usr/bin/git", ["-C", cwd.path, "rev-parse", "--show-toplevel"], environment: environment), result.code == 0 {

@@ -87,7 +87,12 @@ public struct HookEvent: Codable, Equatable, Sendable {
     public var status: String {
         switch event {
         case "UserPromptSubmit", "PreToolUse", "PostToolUse": return "Working"
-        case "PermissionRequest": return "Working"
+        case "PermissionRequest":
+            #if os(macOS)
+            return "Working"
+            #else
+            return "Needs approval"
+            #endif
         case "Stop": return "Done"
         case "Interrupt": return "Interrupted"
         case "SessionEnd": return "Ended"
