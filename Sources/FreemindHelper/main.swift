@@ -22,6 +22,8 @@ do {
     } else if args[0] == "hook" {
         let input = FileHandle.standardInput.readDataToEndOfFile()
         let event = try HookEvent.parse(input)
+        // Subagent hooks share the parent session ID; they must not overwrite its activity.
+        guard event.agentID == nil else { exit(0) }
         let dir = URL(fileURLWithPath: args[1], isDirectory: true)
         guard FileManager.default.fileExists(atPath: dir.path) else { exit(0) }
         try DurableFile.save(event, to: dir.appendingPathComponent("event.json"))

@@ -81,7 +81,10 @@ public actor TerminalBackend {
         } catch { await gate.release(); throw error }
     }
     private func startLocked(_ pane: PaneDefinition, initialPrompt: String?) async throws {
-        if await exists(pane.id) { try await observeExit(pane.id); return }
+        if await exists(pane.id) {
+            _ = try await command(["set-option", "-t", sessionName(pane.id), "allow-passthrough", "on"]).checked()
+            try await observeExit(pane.id); return
+        }
         let manager = FileManager.default
         let socketDir = URL(fileURLWithPath: socket).deletingLastPathComponent()
         try manager.createDirectory(at: socketDir, withIntermediateDirectories: true)
@@ -96,6 +99,7 @@ public actor TerminalBackend {
         set -g exit-unattached off
         set -g destroy-unattached off
         set -g focus-events on
+        set -g allow-passthrough on
         set -g escape-time 0
         set -g set-clipboard external
         set -g remain-on-exit on
@@ -125,6 +129,10 @@ public actor TerminalBackend {
             env["CODEX_HOME"] = home.path
             env["CODEX_SQLITE_HOME"] = home.path
             arguments = try pane.options.arguments()
+            // The TUI emits these only for completion and actual user prompts.
+            // OSC 9 lets Freemind own both the sound and the attention indicator.
+            arguments += ["-c", "tui.notification_method=\"osc9\"", "-c", "tui.notification_condition=\"always\"",
+                          "-c", "tui.notifications=[\"agent-turn-complete\",\"approval-requested\",\"plan-mode-prompt\"]"]
             if pane.options.automaticallyTrustWorkspace {
                 var trustedPaths = Set([paths.root.path, cwd.path])
                 if let result = try? await CommandRunner.run("/usr/bin/git", ["-C", cwd.path, "rev-parse", "--show-toplevel"], environment: environment), result.code == 0 {
@@ -149,6 +157,7 @@ public actor TerminalBackend {
         // tmux accepts separate command argv; workspace text is never evaluated by a shell.
         _ = try await command(["new-session", "-d", "-s", sessionName(pane.id), "-x", "120", "-y", "30", "-c", cwd.path,
                                helper, "launch", requestURL.path]).checked()
+        _ = try await command(["set-option", "-t", sessionName(pane.id), "allow-passthrough", "on"]).checked()
         try await observeExit(pane.id)
     }
     private func observeExit(_ id: UUID) async throws {

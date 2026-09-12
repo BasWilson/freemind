@@ -227,7 +227,7 @@ struct SessionIndicator: View {
         Group {
             if session.error != nil {
                 Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
-            } else if session.status == "Needs approval" {
+            } else if session.needsAttention {
                 Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.yellow)
             } else if ["Working", "Compacting", "Starting"].contains(session.status) {
                 ProgressView().controlSize(.mini).scaleEffect(0.75)

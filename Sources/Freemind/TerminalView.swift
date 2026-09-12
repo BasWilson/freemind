@@ -56,6 +56,10 @@ final class TerminalSession: NSObject, ObservableObject, @preconcurrency LocalPr
     @Published var error: String?
     @Published var conversationID: String?
     @Published var recovered = false
+    @Published private(set) var needsAttention = false
+    var playAttentionSound: () -> Void = {
+        if let sound = NSSound(named: NSSound.Name("Glass")) { sound.play() } else { NSSound.beep() }
+    }
     var onFocus: (() -> Void)?
     var attached = false
     private var lastHookDate: Date?
@@ -70,6 +74,14 @@ final class TerminalSession: NSObject, ObservableObject, @preconcurrency LocalPr
         let fontSize = (try? DurableFile.load(Double.self, from: paths.terminal(pane.id).appendingPathComponent("font.json"))) ?? 13
         view.font = .monospacedSystemFont(ofSize: max(9, min(28, fontSize)), weight: .regular)
         view.processDelegate = self
+        if pane.kind == .codex {
+            view.bellStyle = .none
+            view.getTerminal().registerOscHandler(code: 9) { [weak self] payload in
+                // OSC 9;4 is terminal progress, not a desktop notification.
+                guard !payload.isEmpty, !payload.starts(with: [52, 59]) else { return }
+                self?.receiveAttention()
+            }
+        }
         focusObserver = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -102,14 +114,21 @@ final class TerminalSession: NSObject, ObservableObject, @preconcurrency LocalPr
     }
     func focus() { view.window?.makeFirstResponder(view) }
     func receive(_ event: HookEvent) {
-        guard lastHookDate != event.timestamp else { return }
+        guard event.agentID == nil, lastHookDate == nil || event.timestamp > lastHookDate! else { return }
         lastHookDate = event.timestamp
-        status = event.status
         if let id = event.sessionID { conversationID = id }
-        if event.event == "PermissionRequest", lastAttentionDate != event.timestamp {
-            lastAttentionDate = event.timestamp
-            if let sound = NSSound(named: NSSound.Name("Glass")) { sound.play() } else { NSSound.beep() }
-        }
+        // Polling may deliver an older hook after the live terminal notification.
+        guard lastAttentionDate == nil || event.timestamp > lastAttentionDate! else { return }
+        status = event.status
+        if event.event != "Stop" { needsAttention = false }
+    }
+    func receiveAttention() {
+        guard pane.kind == .codex else { return }
+        lastAttentionDate = Date()
+        guard !needsAttention else { return }
+        needsAttention = true
+        if status != "Done" { status = "Needs attention" }
+        playAttentionSound()
     }
     func disconnect() { if attached { view.terminate(); attached = false } }
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}

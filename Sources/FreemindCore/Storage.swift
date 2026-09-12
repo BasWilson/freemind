@@ -83,10 +83,11 @@ public struct HookEvent: Codable, Equatable, Sendable {
     public var cwd: String?
     public var model: String?
     public var timestamp: Date
+    public var agentID: String? = nil
     public var status: String {
         switch event {
         case "UserPromptSubmit", "PreToolUse", "PostToolUse": return "Working"
-        case "PermissionRequest": return "Needs approval"
+        case "PermissionRequest": return "Working"
         case "Stop": return "Done"
         case "Interrupt": return "Interrupted"
         case "SessionEnd": return "Ended"
@@ -100,6 +101,6 @@ public struct HookEvent: Codable, Equatable, Sendable {
               let event = obj["hook_event_name"] as? String else { throw FreemindError.message("Invalid hook event") }
         let raw = obj["session_id"] as? String
         let id = raw.flatMap { UUID(uuidString: $0) == nil ? nil : $0 }
-        return HookEvent(event: event, sessionID: id, cwd: obj["cwd"] as? String, model: obj["model"] as? String, timestamp: Date())
+        return HookEvent(event: event, sessionID: id, cwd: obj["cwd"] as? String, model: obj["model"] as? String, timestamp: Date(), agentID: obj["agent_id"] as? String)
     }
 }
