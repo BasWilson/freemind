@@ -42,8 +42,10 @@ With the Linux public key configured, every version tag also builds x86_64 and
 ARM64 Linux archives on Ubuntu 24.04 runners. The publishing job checks that both
 archives and signed manifests exist, generates `install.sh` with the pinned
 public key, and publishes installation instructions as the release body and
-`INSTALL.md`. It waits for all configured platforms to pass. Without a Linux
-public key, the workflow continues to release macOS only.
+`INSTALL.md`. Publishing waits for the build jobs to finish and requires both
+macOS builds to pass. If either Linux build fails, macOS still publishes without
+Linux artifacts or installation instructions; the failed Linux jobs remain
+visible in Actions. Without a Linux public key, the workflow releases macOS only.
 
 After the first Linux release, users install with:
 
